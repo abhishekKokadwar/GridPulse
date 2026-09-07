@@ -1,0 +1,11 @@
+numpy
+pandas
+matplotlib
+streamlit
+altair
+psycopg2-binary
+sqlalchemy
+python-dotenv
+confluent-kafka
+scikit-learn
+pyspark

@@ -1,0 +1,17 @@
+# Environment variables & credentials
+.env
+.env.*
+*.env
+!.env.example
+
+# Python virtual environments & bytecode
+.venv/
+__pycache__/
+*.pyc
+
+# Local data & temporary caches
+data/raw/
+data/processed/
+data/lake/
+tmp/
+
