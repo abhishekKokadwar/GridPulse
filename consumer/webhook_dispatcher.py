@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import requests
+from dotenv import load_dotenv
 
 # Add project root to sys.path and remove script_dir to prevent package shadowing
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,7 +21,13 @@ PROJECT_ROOT = os.path.abspath(os.path.join(script_dir, ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-DEFAULT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "")
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+
+def get_default_webhook_url() -> str:
+    """Returns the current ALERT_WEBHOOK_URL from environment."""
+    return os.getenv("ALERT_WEBHOOK_URL", "")
+
+DEFAULT_WEBHOOK_URL = get_default_webhook_url()
 DISPATCH_HISTORY_FILE = os.path.join(PROJECT_ROOT, "tmp", "webhook_dispatch_history.json")
 
 
@@ -74,7 +81,7 @@ def dispatch_peak_shaving_alert(dispatch_plan: Dict[str, Any], webhook_url: Opti
     """
     Constructs and dispatches automated peak-shaving alert payload.
     """
-    url = webhook_url or DEFAULT_WEBHOOK_URL
+    url = webhook_url or get_default_webhook_url()
     max_kw = dispatch_plan.get("peak_forecast_kw", 0.0)
     thresh_kw = dispatch_plan.get("threshold_kw", 850.0)
     overload = dispatch_plan.get("max_overload_kw", 0.0)
@@ -140,7 +147,7 @@ def dispatch_scada_fault_alert(
     """
     Constructs and dispatches immediate SCADA electrical fault alert (e.g. Voltage Sag).
     """
-    url = webhook_url or DEFAULT_WEBHOOK_URL
+    url = webhook_url or get_default_webhook_url()
     color_map = {"CRITICAL": "#ef4444", "WARNING": "#f59e0b", "INFO": "#3b82f6"}
 
     fields = [
