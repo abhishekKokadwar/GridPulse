@@ -13,5 +13,6 @@ __pycache__/
 data/raw/
 data/processed/
 data/lake/checkpoints/
+data/lake/raw_telemetry/_spark_metadata/
 tmp/
 

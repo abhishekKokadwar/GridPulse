@@ -17,6 +17,28 @@ PROJECT_ROOT = os.path.abspath(os.path.join(script_dir, ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+# Load .env variables (with fallback parser)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+except Exception:
+    pass
+
+env_path = os.path.join(PROJECT_ROOT, ".env")
+if os.path.exists(env_path):
+    try:
+        with open(env_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    if k not in os.environ:
+                        os.environ[k] = v
+    except Exception:
+        pass
+
 import pyspark
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json, window, avg, round as spark_round
@@ -71,7 +93,8 @@ def start_stream_processor(output_mode="console"):
         .format("kafka") \
         .option("kafka.bootstrap.servers", DEFAULT_BOOTSTRAP_SERVERS) \
         .option("subscribe", DEFAULT_TOPIC) \
-        .option("startingOffsets", "latest") \
+        .option("startingOffsets", "earliest") \
+        .option("failOnDataLoss", "false") \
         .load()
         
     # 2. Parse JSON Value
@@ -82,7 +105,7 @@ def start_stream_processor(output_mode="console"):
         
     # 3. Apply Sliding Window Aggregations (5-minute window, sliding every 1 minute)
     aggregated_df = parsed_df \
-        .withWatermark("timestamp", "2 minutes") \
+        .withWatermark("timestamp", "5 minutes") \
         .groupBy(
             window(col("timestamp"), "5 minutes", "1 minute"),
             col("building_id")
@@ -99,10 +122,18 @@ def start_stream_processor(output_mode="console"):
     def write_to_postgres(df, epoch_id):
         from pyspark.sql.functions import col
         
-        # Extract window start and end
+        # Extract window start and end, select exact DB columns
         df_out = df.withColumn("window_start", col("window.start")) \
                    .withColumn("window_end", col("window.end")) \
-                   .drop("window")
+                   .drop("window") \
+                   .select(
+                       col("window_start"),
+                       col("window_end"),
+                       col("building_id"),
+                       col("avg_power_kw"),
+                       col("avg_voltage_v"),
+                       col("avg_power_factor")
+                   )
                    
         from urllib.parse import urlparse
         db_url = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/neondb")
@@ -148,12 +179,14 @@ def start_stream_processor(output_mode="console"):
         .withColumn("month", month(col("timestamp"))) \
         .withColumn("day", dayofmonth(col("timestamp")))
         
-    # Because we run in Docker, /app maps to the project root
+    lake_path = "/app/data/lake/raw_telemetry" if os.path.exists("/app") else os.path.join(PROJECT_ROOT, "data", "lake", "raw_telemetry")
+    checkpoint_path = "/app/data/lake/checkpoints/raw_telemetry" if os.path.exists("/app") else os.path.join(PROJECT_ROOT, "data", "lake", "checkpoints", "raw_telemetry")
+    
     lake_query = enriched_df.writeStream \
         .outputMode("append") \
         .format("parquet") \
-        .option("path", "/app/data/lake/raw_telemetry") \
-        .option("checkpointLocation", "/app/data/lake/checkpoints/raw_telemetry") \
+        .option("path", lake_path) \
+        .option("checkpointLocation", checkpoint_path) \
         .partitionBy("year", "month", "day") \
         .trigger(processingTime="30 seconds") \
         .start()
