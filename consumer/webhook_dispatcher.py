@@ -60,20 +60,29 @@ def get_dispatch_history() -> List[Dict[str, Any]]:
     return []
 
 
-def format_slack_card(title: str, color: str, fields: List[Dict[str, str]], summary: str) -> Dict[str, Any]:
+def format_slack_card(
+    title: str,
+    color: str,
+    fields: List[Dict[str, str]],
+    summary: str,
+    username: str = "GridPulse AI Dispatcher",
+    icon_emoji: str = ":zap:",
+) -> Dict[str, Any]:
     """Formats an incident payload into Slack Block Kit / Attachment compatible JSON."""
     return {
+        "username": username,
+        "icon_emoji": icon_emoji,
         "attachments": [
             {
                 "fallback": f"GridPulse Alert: {title}",
                 "color": color,
                 "title": f"⚡ GridPulse Incident Dispatch: {title}",
-                "text": summary,
+                "text": f"{summary}\n🔗 <http://localhost:8501|Open GridPulse Operations Portal>",
                 "fields": [{"title": f["name"], "value": f["value"], "short": f.get("short", True)} for f in fields],
-                "footer": "GridPulse Automated Demand Response Engine",
+                "footer": "GridPulse Automated Demand Response & SCADA Engine",
                 "ts": int(time.time()),
             }
-        ]
+        ],
     }
 
 
@@ -108,6 +117,8 @@ def dispatch_peak_shaving_alert(dispatch_plan: Dict[str, Any], webhook_url: Opti
         color="#f59e0b" if overload < 100 else "#ef4444",
         fields=fields,
         summary=f"Automated Demand Response system has triggered peak-shaving countermeasures to prevent contract demand penalties.",
+        username="GridPulse AI Dispatcher",
+        icon_emoji=":battery:",
     )
 
     result_status = "SIMULATED_SUCCESS"
@@ -162,6 +173,8 @@ def dispatch_scada_fault_alert(
         color=color_map.get(severity, "#ef4444"),
         fields=fields,
         summary=f"Sub-meter {meter_id} in {building_id} observed a {alert_type} breach ({metric_value:.2f} vs limit {threshold_value:.2f}).",
+        username="GridPulse SCADA Watchdog",
+        icon_emoji=":rotating_light:",
     )
 
     result_status = "SIMULATED_SUCCESS"

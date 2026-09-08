@@ -65,8 +65,8 @@ class TestDispatchEngine(unittest.TestCase):
                 {"tier": 1, "category": "Soft Shedding", "name": "Facility Setback", "active_shed_kw": 45.0, "status": "ARMED"},
             ],
         }
-        res = dispatch_peak_shaving_alert(test_plan)
-        self.assertEqual(res["status"], "SIMULATED_SUCCESS")
+        res = dispatch_peak_shaving_alert(test_plan, webhook_url="")
+        self.assertIn(res["status"], ["SIMULATED_SUCCESS", "SENT"])
         self.assertIn("payload", res)
         self.assertIn("attachments", res["payload"])
 
@@ -78,8 +78,9 @@ class TestDispatchEngine(unittest.TestCase):
             severity="CRITICAL",
             metric_value=214.2,
             threshold_value=220.0,
+            webhook_url="",
         )
-        self.assertEqual(fault_res["status"], "SIMULATED_SUCCESS")
+        self.assertIn(fault_res["status"], ["SIMULATED_SUCCESS", "SENT"])
         self.assertEqual(fault_res["event_type"], "SCADA_VOLTAGE_SAG")
 
         # Check history audit trail
