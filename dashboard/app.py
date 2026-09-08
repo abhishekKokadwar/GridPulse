@@ -334,7 +334,9 @@ with tab_realtime:
         df_agg = load_streaming_aggregates(limit=1000)
         
         if df_agg.empty:
-            st.info("Waiting for streaming data... Ensure Kafka producer and Spark processor are running.")
+            st.info("ℹ️ **Kafka-Spark Sliding Window Aggregates Table is currently waiting for stream events.**\n\n"
+                    "• To stream real-time events into this table, run `python simulator/kafka_producer.py` and `python stream_processor/spark_processor.py` on your machine.\n"
+                    "• To test the **Automated Incident Webhook Dispatcher (Slack)** and **24h Predictive AI Forecast**, click on the **🔮 Phase 6: AI Forecasting & Dispatch** tab above.")
             return
 
         # Latest window stats
@@ -623,7 +625,20 @@ with tab_forecast:
 
     # 6. Automated Webhook Alert Dispatcher Console
     with st.expander("🔔 Automated Incident Webhook Dispatcher Console", expanded=True):
-        default_wh = os.getenv("ALERT_WEBHOOK_URL", "")
+        default_wh = os.getenv("ALERT_WEBHOOK_URL", "").strip()
+        if not default_wh:
+            try:
+                if hasattr(st, "secrets"):
+                    if "ALERT_WEBHOOK_URL" in st.secrets:
+                        default_wh = str(st.secrets["ALERT_WEBHOOK_URL"]).strip()
+                    elif "alert_webhook_url" in st.secrets:
+                        default_wh = str(st.secrets["alert_webhook_url"]).strip()
+            except Exception:
+                pass
+
+        if "webhook_url_input" not in st.session_state or not st.session_state["webhook_url_input"]:
+            st.session_state["webhook_url_input"] = default_wh
+
         col_cfg1, col_cfg2 = st.columns([3, 1])
         with col_cfg1:
             active_wh = st.text_input(
@@ -653,13 +668,22 @@ with tab_forecast:
                 st.info("No webhooks dispatched yet. Trigger a simulated dispatch below.")
         with col_wh2:
             st.markdown("##### ⚡ Trigger Alert Payloads")
+            if "last_wh_feedback" in st.session_state:
+                status_type, msg = st.session_state["last_wh_feedback"]
+                if status_type == "success":
+                    st.success(msg)
+                else:
+                    st.info(msg)
+
             if st.button("📢 Dispatch Peak Shaving Alert", use_container_width=True):
                 rec = dispatch_peak_shaving_alert(dispatch_plan, webhook_url=active_wh if active_wh else None)
                 if rec["status"] == "SENT":
-                    st.success(f"Dispatched Peak Alert to Webhook! (HTTP {rec['status_code']})")
+                    st.session_state["last_wh_feedback"] = ("success", f"Dispatched Peak Alert to Slack! (HTTP {rec['status_code']})")
+                    st.toast(f"✅ Dispatched Peak Alert to Slack! (HTTP {rec['status_code']})", icon="📢")
                 else:
-                    st.info(f"Dispatched to Mock Console: {rec['status']}")
-                time.sleep(1)
+                    st.session_state["last_wh_feedback"] = ("info", f"Dispatched to Mock Console: {rec['status']}")
+                    st.toast(f"ℹ️ Recorded locally: {rec['status']}", icon="📝")
+                time.sleep(0.5)
                 st.rerun()
 
             if st.button("🚨 Dispatch SCADA Fault Alert", use_container_width=True):
@@ -673,10 +697,12 @@ with tab_forecast:
                     webhook_url=active_wh if active_wh else None,
                 )
                 if rec["status"] == "SENT":
-                    st.success(f"Dispatched SCADA Alert to Webhook! (HTTP {rec['status_code']})")
+                    st.session_state["last_wh_feedback"] = ("success", f"Dispatched SCADA Alert to Slack! (HTTP {rec['status_code']})")
+                    st.toast(f"✅ Dispatched SCADA Alert to Slack! (HTTP {rec['status_code']})", icon="🚨")
                 else:
-                    st.info(f"Dispatched to Mock Console: {rec['status']}")
-                time.sleep(1)
+                    st.session_state["last_wh_feedback"] = ("info", f"Dispatched to Mock Console: {rec['status']}")
+                    st.toast(f"ℹ️ Recorded locally: {rec['status']}", icon="📝")
+                time.sleep(0.5)
                 st.rerun()
 
 # ---------------------------------------------------------

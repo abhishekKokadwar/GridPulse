@@ -24,8 +24,19 @@ if PROJECT_ROOT not in sys.path:
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 def get_default_webhook_url() -> str:
-    """Returns the current ALERT_WEBHOOK_URL from environment."""
-    return os.getenv("ALERT_WEBHOOK_URL", "")
+    """Returns the current ALERT_WEBHOOK_URL from environment or st.secrets."""
+    url = os.getenv("ALERT_WEBHOOK_URL", "").strip()
+    if not url:
+        try:
+            import streamlit as st
+            if hasattr(st, "secrets"):
+                if "ALERT_WEBHOOK_URL" in st.secrets:
+                    url = str(st.secrets["ALERT_WEBHOOK_URL"]).strip()
+                elif "alert_webhook_url" in st.secrets:
+                    url = str(st.secrets["alert_webhook_url"]).strip()
+        except Exception:
+            pass
+    return url
 
 DEFAULT_WEBHOOK_URL = get_default_webhook_url()
 DISPATCH_HISTORY_FILE = os.path.join(PROJECT_ROOT, "tmp", "webhook_dispatch_history.json")
