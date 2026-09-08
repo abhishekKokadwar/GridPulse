@@ -22,6 +22,7 @@ from confluent_kafka import Consumer, KafkaError
 from database.db import insert_readings_and_alerts, DB_AVAILABLE
 from analysis.ml_anomaly_detector import MLAnomalyDetector
 from analysis.analysis import load_energy_data
+from consumer.webhook_dispatcher import dispatch_scada_fault_alert
 
 DEFAULT_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 DEFAULT_TOPIC = os.getenv("KAFKA_TOPIC", "gridpulse.telemetry.raw")
@@ -114,6 +115,15 @@ def start_telemetry_consumer(
             # Clean ASCII Tag representation
             if eval_result["is_anomaly"]:
                 tag = f"[ANOMALY: {eval_result['primary_reason']}]"
+                if eval_result.get("severity") == "CRITICAL":
+                    dispatch_scada_fault_alert(
+                        meter_id=key,
+                        building_id=bldg,
+                        alert_type=eval_result["primary_reason"],
+                        severity="CRITICAL",
+                        metric_value=float(volt if "VOLTAGE" in eval_result["primary_reason"] else pwr),
+                        threshold_value=float(220.0 if "SAG" in eval_result["primary_reason"] else 240.0),
+                    )
             else:
                 tag = "[NOMINAL]"
 

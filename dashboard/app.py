@@ -45,12 +45,27 @@ from simulator.simulator import (
     generate_historical_batch,
     CAMPUS_INFRASTRUCTURE,
 )
+from analysis.lake_analytics import (
+    get_lake_metadata,
+    query_lake_telemetry,
+    query_lake_hourly_profile,
+    query_lake_building_summary,
+    benchmark_query_performance,
+)
+from scripts.compact_lake import run_compaction
+from analysis.forecaster import LoadForecaster
+from analysis.dispatch_engine import evaluate_dispatch_plan
+from consumer.webhook_dispatcher import (
+    dispatch_peak_shaving_alert,
+    dispatch_scada_fault_alert,
+    get_dispatch_history,
+)
 
 # ---------------------------------------------------------
 # Page Configuration
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="GridPulse | Phase 2 PostgreSQL Energy Monitor",
+    page_title="GridPulse | Smart Campus Energy Monitoring, Lakehouse & AI Dispatch",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -291,8 +306,10 @@ st.markdown("<br>", unsafe_allow_html=True)
 # ---------------------------------------------------------
 # Main Tabs Layout
 # ---------------------------------------------------------
-tab_realtime, tab_trends, tab_schedules, tab_hierarchy, tab_anomalies, tab_db_schema, tab_explorer = st.tabs([
+tab_realtime, tab_lakehouse, tab_forecast, tab_trends, tab_schedules, tab_hierarchy, tab_anomalies, tab_db_schema, tab_explorer = st.tabs([
     "⚡ Phase 4: Real-Time Stream",
+    "🧊 Phase 5: Data Lakehouse",
+    "🔮 Phase 6: AI Forecasting & Dispatch",
     "📈 Multi-Day Timeline",
     "🕒 24-Hour & Schedule Curves",
     "🏢 Infrastructure & Buildings",
@@ -377,7 +394,293 @@ with tab_realtime:
     realtime_streaming_view()
 
 # ---------------------------------------------------------
-# Tab 1: Multi-Day Timeline
+# Tab 1: Phase 5 Data Lakehouse Explorer (DuckDB & Parquet)
+# ---------------------------------------------------------
+with tab_lakehouse:
+    st.subheader("🧊 Phase 5: Columnar Data Lakehouse & Cold Path Analytics")
+    st.caption("Zero-copy, in-process analytical query processing over Snappy-compressed Parquet files via DuckDB.")
+
+    lake_meta = get_lake_metadata()
+
+    if not lake_meta["exists"] or lake_meta["total_records"] == 0:
+        st.warning("⚠️ No Data Lake partitions detected on disk at `data/lake/raw_telemetry`.")
+        col_gen1, col_gen2 = st.columns([2, 1])
+        with col_gen1:
+            st.info("Hydrate the lakehouse from historical CSV data or let Spark Structured Streaming write micro-batches.")
+        with col_gen2:
+            if st.button("🚀 Hydrate Lake from Raw CSV", use_container_width=True):
+                from simulator.lake_exporter import export_from_csv
+                with st.spinner("Hydrating partitioned Parquet lake..."):
+                    cnt = export_from_csv()
+                    st.success(f"Successfully generated {cnt:,} records across partitions!")
+                    time.sleep(1)
+                    st.rerun()
+    else:
+        # 1. Health & Storage Metric Cards
+        col_l1, col_l2, col_l3, col_l4 = st.columns(4)
+        with col_l1:
+            st.metric("Total Archived Records", f"{lake_meta['total_records']:,}")
+        with col_l2:
+            st.metric("Active Partitions", f"{len(lake_meta['partitions'])} Days")
+        with col_l3:
+            st.metric("Lake Storage Footprint", f"{lake_meta['total_size_mb']} MB", delta=f"{lake_meta['total_files']} files")
+        with col_l4:
+            ts_span = ""
+            if lake_meta['min_timestamp'] and lake_meta['max_timestamp']:
+                ts_span = f"{pd.to_datetime(lake_meta['min_timestamp']).strftime('%b %d')} - {pd.to_datetime(lake_meta['max_timestamp']).strftime('%b %d')}"
+            st.metric("Time Horizon", ts_span if ts_span else "N/A", delta=f"{lake_meta['meters_count']} Meters")
+
+        # 2. Performance Benchmark & Small-File Compaction Bar
+        with st.expander("⚡ Columnar Speedup Benchmark & Compaction Engine", expanded=True):
+            col_b1, col_b2 = st.columns([2, 1])
+            with col_b1:
+                st.markdown("##### 🚀 Hot vs Cold Analytical Query Latency")
+                bench = benchmark_query_performance()
+                ratio_str = f"{bench['speedup_ratio']}x faster" if bench.get('speedup_ratio') else "Vectorized In-Process"
+                st.markdown(
+                    f"""
+                    - **Cold Path (DuckDB over Parquet):** `{bench['lake_time_ms']} ms` for `{bench['scanned_rows']:,}` rows.
+                    - **Hot Path (PostgreSQL Relational):** `{bench['db_time_ms'] if bench['db_time_ms'] else 'N/A'} ms`.
+                    - **Performance Acceleration:** **{ratio_str}**
+                    """
+                )
+            with col_b2:
+                st.markdown("##### 🧹 Micro-Batch Compaction")
+                st.caption("Coalesce 30s Spark micro-batch files into consolidated daily Parquet blocks.")
+                if st.button("Run Lake Compaction", use_container_width=True):
+                    with st.spinner("Compacting small parquet part files..."):
+                        comp_res = run_compaction()
+                        if comp_res["status"] == "SUCCESS":
+                            st.success(
+                                f"Compaction finished in {comp_res['elapsed_ms']}ms. "
+                                f"Reduced {comp_res['total_files_before']} -> {comp_res['total_files_after']} files "
+                                f"across {comp_res['partitions_compacted']} partitions."
+                            )
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(comp_res.get("message", "Compaction failed"))
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # 3. Analytical Lake Queries
+        col_q1, col_q2 = st.columns([1, 2])
+        with col_q1:
+            st.markdown("#### 🔍 Partition Filter")
+            cat_list = ["All", "Hostels", "Departments", "Facilities", "Lecture Theatres"]
+            selected_cat = st.selectbox("Building Category", cat_list, key="lake_cat")
+            limit_val = st.slider("Query Row Limit", 100, 5000, 1000, step=100, key="lake_limit")
+            
+            st.markdown("#### 📂 Partitions on Disk")
+            st.code("\n".join(lake_meta["partitions"][:10]) + ("\n..." if len(lake_meta["partitions"]) > 10 else ""), language="text")
+
+        with col_q2:
+            st.markdown("#### 🕒 Cold-Path 24-Hour Diurnal Load Profile (DuckDB)")
+            hourly_lake_df = query_lake_hourly_profile(building_type=selected_cat)
+            if not hourly_lake_df.empty:
+                chart_lake_hourly = (
+                    alt.Chart(hourly_lake_df)
+                    .mark_line(point=True, strokeWidth=3, color="#38bdf8")
+                    .encode(
+                        x=alt.X("hour:O", title="Hour of Day (0-23)"),
+                        y=alt.Y("avg_power_kw:Q", title="Mean Power (kW)"),
+                        tooltip=["hour:O", "avg_power_kw:Q", "min_power_kw:Q", "max_power_kw:Q", "avg_voltage_v:Q"]
+                    )
+                    .properties(height=260)
+                )
+                st.altair_chart(chart_lake_hourly, use_container_width=True)
+
+        st.markdown("#### 🏢 Building Energy Aggregates (Scanned Directly from Parquet)")
+        bld_summary_df = query_lake_building_summary()
+        if not bld_summary_df.empty:
+            chart_bld_bar = (
+                alt.Chart(bld_summary_df)
+                .mark_bar(color="#0ea5e9", cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
+                .encode(
+                    x=alt.X("building_id:N", sort="-y", title="Campus Building"),
+                    y=alt.Y("avg_power_kw:Q", title="Average Load (kW)"),
+                    color=alt.Color("building_type:N", title="Category"),
+                    tooltip=["building_id", "building_type", "avg_power_kw", "est_total_kwh", "meter_count"]
+                )
+                .properties(height=260)
+            )
+            st.altair_chart(chart_bld_bar, use_container_width=True)
+
+        st.markdown("#### 🗄️ Ad-Hoc Parquet Query View")
+        lake_query_df = query_lake_telemetry(building_type=selected_cat, limit=limit_val)
+        st.dataframe(lake_query_df, use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------
+# Tab 2: Phase 6 AI Forecasting & Automated Dispatch
+# ---------------------------------------------------------
+with tab_forecast:
+    st.subheader("🔮 Phase 6: Predictive AI Load Forecasting & Automated Dispatch")
+    st.caption("24-Hour ahead recursive energy forecasting with 95% confidence bounds and automated demand-response peak-shaving dispatch.")
+
+    forecaster = LoadForecaster()
+    is_loaded = forecaster.load_model()
+    if not is_loaded:
+        with st.spinner("Training predictive time-series models on historical telemetry..."):
+            forecaster.train_and_evaluate()
+
+    # 1. Model Performance & Configuration Bar
+    col_fc1, col_fc2 = st.columns([2, 1])
+    with col_fc1:
+        st.markdown("##### 🧠 Active AI Forecasting Model")
+        m_name = forecaster.model_name or "RandomForestRegressor"
+        metrics = forecaster.metrics or {}
+        st.markdown(
+            f"""
+            - **Architecture:** `{m_name}` (Chronological Train/Validation Split)
+            - **Evaluation Error Metrics:** MAE: `{metrics.get('MAE', 'N/A')} kW` | RMSE: `{metrics.get('RMSE', 'N/A')} kW` | MAPE: `{metrics.get('MAPE', 'N/A')}%`
+            - **Input Features:** Cyclical Fourier Harmonics ($\sin/\cos$), Academic Day, Autoregressive Lags ($t-1, t-24$).
+            """
+        )
+    with col_fc2:
+        st.markdown("##### ⚙️ Contract Threshold Controls")
+        peak_threshold_input = st.slider("Contract Demand Limit (kW)", min_value=600.0, max_value=1200.0, value=780.0, step=20.0, key="peak_thresh_slider")
+        tariff_input = st.number_input("Demand Charge (INR/kW/mo)", min_value=100.0, max_value=1000.0, value=350.0, step=25.0, key="tariff_slider")
+
+    # 2. Generate 24-Hour Predictions & Evaluate Dispatch
+    pred_df = forecaster.generate_24h_forecast()
+    dispatch_plan = evaluate_dispatch_plan(pred_df, peak_threshold_kw=peak_threshold_input, tariff_rate=tariff_input)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 3. Peak Demand Status & Financial KPIs
+    col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+    with col_k1:
+        st.metric("24h Peak Forecast", f"{dispatch_plan['peak_forecast_kw']:,.1f} kW")
+    with col_k2:
+        st.metric("Contract Demand Limit", f"{dispatch_plan['threshold_kw']:,.1f} kW")
+    with col_k3:
+        delta_color = "inverse" if dispatch_plan["has_violations"] else "normal"
+        overload_str = f"+{dispatch_plan['max_overload_kw']:.1f} kW" if dispatch_plan["has_violations"] else "0.0 kW (Nominal)"
+        st.metric("Projected Peak Overload", overload_str, delta=f"{dispatch_plan['violation_hours_count']} Hours Impacted", delta_color=delta_color)
+    with col_k4:
+        st.metric("Demand Tariff Savings", f"INR {dispatch_plan['est_monthly_savings']:,.0f}", delta=f"Cap: {dispatch_plan['total_shed_kw']:.0f} kW")
+
+    # 4. Forecast Horizon & Dispatch Visualizations
+    st.markdown("#### 📈 24-Hour Forecast Horizon vs Peak Demand Limit")
+    chart_data = dispatch_plan["adjusted_forecast_df"].copy()
+    chart_data["contract_threshold"] = peak_threshold_input
+
+    # Base line: Predicted load
+    base_chart = alt.Chart(chart_data).encode(x=alt.X("forecast_time:T", title="Forecast Horizon (Next 24 Hours)"))
+
+    # Confidence interval band
+    band = base_chart.mark_area(opacity=0.2, color="#38bdf8").encode(
+        y=alt.Y("lower_ci_95:Q", title="Grid Power Demand (kW)"),
+        y2=alt.Y2("upper_ci_95:Q"),
+    )
+
+    # Predicted load line
+    pred_line = base_chart.mark_line(color="#38bdf8", strokeWidth=3).encode(
+        y=alt.Y("predicted_load_kw:Q"),
+        tooltip=[
+            alt.Tooltip("forecast_time:T", title="Time"),
+            alt.Tooltip("predicted_load_kw:Q", title="Forecast (kW)"),
+            alt.Tooltip("dispatched_load_kw:Q", title="Dispatched (kW)"),
+            alt.Tooltip("lower_ci_95:Q", title="Lower 95%"),
+            alt.Tooltip("upper_ci_95:Q", title="Upper 95%"),
+        ],
+    )
+
+    # Post-dispatch line
+    disp_line = base_chart.mark_line(color="#10b981", strokeWidth=3, strokeDash=[5, 5]).encode(
+        y=alt.Y("dispatched_load_kw:Q")
+    )
+
+    # Threshold rule
+    rule = alt.Chart(chart_data).mark_rule(color="#ef4444", strokeWidth=2).encode(
+        y=alt.Y("contract_threshold:Q")
+    )
+
+    combined_fc_chart = (band + pred_line + disp_line + rule).properties(height=320).interactive()
+    st.altair_chart(combined_fc_chart, use_container_width=True)
+    st.caption("🔵 Solid Blue: Uncontrolled AI Forecast | 🟢 Dashed Green: Post-Dispatch Profile | 🔴 Red: Contract Demand Limit | Shaded Blue: 95% Confidence Band")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 5. Automated Demand-Response Directives
+    st.markdown("#### ⚡ Automated Demand-Response Directives (Peak-Shaving Actions)")
+    if not dispatch_plan["has_violations"]:
+        st.success("✅ **Campus Grid Nominal:** Peak load remains within contract demand threshold. No automated load-shedding required.")
+    else:
+        st.warning(f"⚠️ **Peak Demand Mitigation Active:** {dispatch_plan['violation_hours_count']} hours exceed contract capacity. Prescriptive dispatch countermeasures engaged:")
+        for action in dispatch_plan["actions"]:
+            col_a1, col_a2 = st.columns([3, 1])
+            with col_a1:
+                tier_badge = "🟢 Tier 1 (Soft)" if action['tier'] == 1 else ("🟡 Tier 2 (Chillers)" if action['tier'] == 2 else "🔴 Tier 3 (BESS)")
+                st.markdown(f"**{tier_badge}: {action['name']}**")
+                st.write(f"_{action['action_desc']}_")
+                st.caption(f"**Target Zones:** {', '.join(action['target_zones'])} | **Meters:** {', '.join(action['target_meters'])}")
+            with col_a2:
+                status_color = "green" if action['status'] == "ARMED" else "gray"
+                st.markdown(f"<span style='color:{status_color}; font-weight:bold;'>STATUS: {action['status']}</span>", unsafe_allow_html=True)
+                st.metric("Active Shed Target", f"{action['active_shed_kw']:.1f} kW", delta=f"Cap: {action['shed_capacity_kw']:.0f} kW")
+            st.divider()
+
+    # 6. Automated Webhook Alert Dispatcher Console
+    with st.expander("🔔 Automated Incident Webhook Dispatcher Console", expanded=True):
+        default_wh = os.getenv("ALERT_WEBHOOK_URL", "")
+        col_cfg1, col_cfg2 = st.columns([3, 1])
+        with col_cfg1:
+            active_wh = st.text_input(
+                "Target Webhook Endpoint URL (Slack, Discord, or Webhook.site)",
+                value=st.session_state.get("webhook_url_input", default_wh),
+                placeholder="https://hooks.slack.com/services/... or https://webhook.site/...",
+                help="Paste your Slack webhook, Discord webhook (append /slack), or free https://webhook.site URL.",
+                key="wh_url_field",
+            )
+            st.session_state["webhook_url_input"] = active_wh
+        with col_cfg2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if active_wh and active_wh.startswith("http"):
+                st.markdown("<span class='badge badge-success'>🟢 LIVE WEBHOOK ACTIVE</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span class='badge badge-warning'>🟡 MOCK CONSOLE MODE</span>", unsafe_allow_html=True)
+
+        st.markdown("---")
+        col_wh1, col_wh2 = st.columns([2, 1])
+        with col_wh1:
+            st.markdown("##### 🚀 External Webhook Notification Engine")
+            st.caption("Delivers rich incident cards to Slack, Discord, MS Teams, or HTTP endpoints with zero code changes.")
+            recent_logs = get_dispatch_history()
+            if recent_logs:
+                st.dataframe(pd.DataFrame(recent_logs)[["timestamp", "event_type", "title", "status", "status_code"]], use_container_width=True, hide_index=True)
+            else:
+                st.info("No webhooks dispatched yet. Trigger a simulated dispatch below.")
+        with col_wh2:
+            st.markdown("##### ⚡ Trigger Alert Payloads")
+            if st.button("📢 Dispatch Peak Shaving Alert", use_container_width=True):
+                rec = dispatch_peak_shaving_alert(dispatch_plan, webhook_url=active_wh if active_wh else None)
+                if rec["status"] == "SENT":
+                    st.success(f"Dispatched Peak Alert to Webhook! (HTTP {rec['status_code']})")
+                else:
+                    st.info(f"Dispatched to Mock Console: {rec['status']}")
+                time.sleep(1)
+                st.rerun()
+
+            if st.button("🚨 Dispatch SCADA Fault Alert", use_container_width=True):
+                rec = dispatch_scada_fault_alert(
+                    meter_id="M001",
+                    building_id="BH1",
+                    alert_type="VOLTAGE_SAG",
+                    severity="CRITICAL",
+                    metric_value=212.4,
+                    threshold_value=220.0,
+                    webhook_url=active_wh if active_wh else None,
+                )
+                if rec["status"] == "SENT":
+                    st.success(f"Dispatched SCADA Alert to Webhook! (HTTP {rec['status_code']})")
+                else:
+                    st.info(f"Dispatched to Mock Console: {rec['status']}")
+                time.sleep(1)
+                st.rerun()
+
+# ---------------------------------------------------------
+# Tab 3: Multi-Day Timeline
 # ---------------------------------------------------------
 with tab_trends:
     st.subheader("Campus Aggregate Power Load Over Time")

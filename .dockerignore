@@ -1,0 +1,35 @@
+# Git and VCS
+.git/
+.gitignore
+
+# Environment & Credentials
+.env
+.env.*
+*.env
+!.env.example
+
+# Raw Data & Checkpoints (keep image light, mount via volumes if needed)
+data/raw/
+data/processed/
+data/lake/checkpoints/
+
+# Virtual Environments & Python Cache
+.venv/
+env/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local Temporary Files & Artifacts
+tmp/
+*.log
+.DS_Store
+Thumbs.db
+
+# Documentation source markdown (optional, keep docs in repo)
+docs/

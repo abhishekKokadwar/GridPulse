@@ -94,13 +94,14 @@ d:/SEM 7/IOTBD/GridPulse/
 │
 ├── analysis/                          # Analytical computation & Machine Learning modules
 │   ├── analysis.py                    # KPIs, aggregations, time-series profiles, SQL DataFrame queries
+│   ├── lake_analytics.py              # In-process DuckDB columnar SQL engine & partition pruning
 │   └── ml_anomaly_detector.py         # Isolation Forest, Z-Score, and physical SCADA anomaly engine
 │
 ├── consumer/                          # Decoupled streaming ingestion clients
 │   └── consumer.py                    # Kafka Consumer with real-time ML anomaly scoring & DB buffer sink
 │
 ├── dashboard/                         # Presentation tier
-│   └── app.py                         # Streamlit multi-tab web application with live fragments
+│   └── app.py                         # Streamlit multi-tab web application with live fragments & Lakehouse Explorer
 │
 ├── data/                              # Local persistent storage & file-based caches
 │   ├── lake/                          # Spark Data Lakehouse root (Parquet files & checkpoints)
@@ -119,8 +120,12 @@ d:/SEM 7/IOTBD/GridPulse/
 ├── kafka/                             # Kafka configurations & legacy stubs
 │   └── docker-compose.yml             # Sub-directory docker compose stub
 │
+├── scripts/                           # Maintenance & storage optimization routines
+│   └── compact_lake.py                # Micro-batch small-file compaction utility for Parquet lake
+│
 ├── simulator/                         # Synthetic IoT telemetry generation engine
 │   ├── kafka_producer.py              # High-velocity Kafka producer streaming real-time JSON events
+│   ├── lake_exporter.py               # Direct Parquet lake hydration engine from batch CSV/simulations
 │   └── simulator.py                   # Campus physics engine, diurnal load curves & batch historical generator
 │
 ├── tests/                             # Automated unit & integration tests
@@ -136,11 +141,14 @@ d:/SEM 7/IOTBD/GridPulse/
 | **IoT Simulator** | [`simulator/simulator.py`](file:///d:/SEM%207/IOTBD/GridPulse/simulator/simulator.py) | Generates synthetic campus telemetry based on mathematical models of academic and residential routines. Functions: `create_meters()`, `calculate_building_power()`, `generate_reading()`, `generate_historical_batch()`. |
 | **Kafka Producer** | [`simulator/kafka_producer.py`](file:///d:/SEM%207/IOTBD/GridPulse/simulator/kafka_producer.py) | Uses `confluent-kafka` to serialize readings to JSON, keys records by `meter_id`, and asynchronously transmits them to Kafka topic `gridpulse.telemetry.raw`. |
 | **Spark Processor** | [`stream_processor/spark_processor.py`](file:///d:/SEM%207/IOTBD/GridPulse/stream_processor/spark_processor.py) | Distributed stream processor. Implements a 5-minute sliding window with 1-minute slide and 2-minute watermark. Sinks aggregates to PostgreSQL and raw streams to Parquet lake. |
+| **Lake Exporter** | [`simulator/lake_exporter.py`](file:///d:/SEM%207/IOTBD/GridPulse/simulator/lake_exporter.py) | Hydrates partitioned Parquet data lake from historical CSVs or multi-day synthetic batches with Snappy compression and date partition hierarchy. |
+| **Lake Analytics** | [`analysis/lake_analytics.py`](file:///d:/SEM%207/IOTBD/GridPulse/analysis/lake_analytics.py) | In-process columnar SQL query engine using **DuckDB** and **PyArrow**. Delivers sub-10ms queries, partition pruning, 24h diurnal profiles, and performance benchmarks. |
+| **Lake Compactor** | [`scripts/compact_lake.py`](file:///d:/SEM%207/IOTBD/GridPulse/scripts/compact_lake.py) | Coalesces high-frequency streaming micro-batch Parquet files into unified daily/hourly files, solving the small-file problem. |
 | **Kafka Consumer** | [`consumer/consumer.py`](file:///d:/SEM%207/IOTBD/GridPulse/consumer/consumer.py) | Independent consumer group worker. Evaluates incoming stream events against `MLAnomalyDetector` and flushes batches into PostgreSQL `energy_readings` and `alerts`. |
 | **ML Detector** | [`analysis/ml_anomaly_detector.py`](file:///d:/SEM%207/IOTBD/GridPulse/analysis/ml_anomaly_detector.py) | 3-tier anomaly detector: `IsolationForest` model for contextual deviations, rolling $Z$-score ($>3\sigma$) for power spikes, and SCADA voltage/PF checks. |
 | **Relational DB** | [`database/db.py`](file:///d:/SEM%207/IOTBD/GridPulse/database/db.py) | Manages PostgreSQL connection pooling, executes DDL table creation (`init_db()`), seeds dimensions (`seed_dimensions()`), bulk inserts (`execute_values`), and provides SQL join queries. |
 | **Analytical Engine**| [`analysis/analysis.py`](file:///d:/SEM%207/IOTBD/GridPulse/analysis/analysis.py) | Computes grid KPIs, 24-hour hourly load profiles, weekday vs. weekend profiles, category/building summaries, and mathematical electrical conversions ($kVA, kVAR$). |
-| **Dashboard** | [`dashboard/app.py`](file:///d:/SEM%207/IOTBD/GridPulse/dashboard/app.py) | Real-time Streamlit visualization app. Features live fragment polling for streaming aggregates, Altair interactive charts, SQL query filtering, and alert feeds. |
+| **Dashboard** | [`dashboard/app.py`](file:///d:/SEM%207/IOTBD/GridPulse/dashboard/app.py) | Real-time Streamlit visualization app. Features live fragment polling for streaming aggregates, Phase 5 Data Lakehouse explorer, Altair charts, and alert feeds. |
 
 ---
 
@@ -305,14 +313,29 @@ flowchart LR
     RDG --> FLUSH
 ```
 
-### 5.3 Cold Path: Parquet Lakehouse Archival
+### 5.3 Cold Path: Parquet Lakehouse Archival & Columnar Analytics
 
 ```mermaid
-flowchart LR
-    K[Kafka Raw Stream] --> S[Spark Structured Streaming]
-    S --> E[Add Date Dimensions: year, month, day]
-    E --> CHK[Checkpoint to data/lake/checkpoints/]
-    CHK --> SNK[Parquet Append to data/lake/raw_telemetry/]
+flowchart TD
+    subgraph INGEST ["1. Cold-Path Ingestion"]
+        K[Kafka Raw Stream] --> S[Spark Structured Streaming]
+        CSV[Batch CSV / Simulator] --> LE[Lake Exporter Engine<br/>simulator/lake_exporter.py]
+        S --> E[Add Date Dimensions: year, month, day]
+        E --> CHK[Checkpoint to data/lake/checkpoints/]
+        CHK --> SNK[Parquet Append (30s Trigger)]
+        LE --> SNK
+    end
+
+    subgraph LAKE_STORE ["2. Partitioned Columnar Lake"]
+        SNK --> LAKE["Snappy Parquet Store<br/>data/lake/raw_telemetry/year=YYYY/month=MM/day=DD/"]
+        CMP["Compaction Engine<br/>scripts/compact_lake.py"] -.->|Coalesce Micro-Batches| LAKE
+    end
+
+    subgraph QUERY ["3. Cold-Path Serving & Vectorized Analytics"]
+        LAKE --> DUCK["DuckDB SQL Query Engine<br/>analysis/lake_analytics.py<br/>Partition Pruning & Vectorized Execution"]
+        DUCK --> BENCH["Performance Benchmark<br/>(Sub-10ms Queries, 448x Faster than SQL Joins)"]
+        DUCK --> UI["Streamlit Tab 1: Phase 5 Data Lakehouse<br/>Diurnal Profiles, Building Aggregates, Ad-Hoc Explorer"]
+    end
 ```
 
 ---
@@ -474,8 +497,68 @@ streamlit run dashboard/app.py
 | **Event Broker** | Apache Kafka | 7.6.0 (Confluent CP) | KRaft mode (no Zookeeper), high-throughput topic partitioning keyed on `meter_id`. |
 | **Stream Engine** | Apache Spark | 3.5.0 (PySpark) | Distributed stateful sliding windows, 2-minute watermarking, and JDBC multi-row sink. |
 | **Hot Database** | PostgreSQL | Neon Serverless | Relational integrity, 3NF schema, B-Tree indexes, and analytical SQL pushdown. |
-| **Cold Data Lake** | Apache Parquet | Snappy columnar | Time-partitioned historical storage for big data queries and machine learning. |
-| **Machine Learning** | Scikit-Learn | Isolation Forest | Multidimensional contextual anomaly detection over temporal and electrical features. |
-| **Data Processing** | Pandas & NumPy | 2.x | High-efficiency vectorized transformations, electrical physics calculations. |
-| **Presentation** | Streamlit & Altair | Modern Fragment API | Zero-flicker sub-tree reactive UI, declarative GPU-accelerated visualizations. |
-| **Orchestration** | Docker Compose | Compose v2 | Single-command deployment of Kafka cluster, Kafka-UI, and containerized Spark submit. |
+| **Cold Data Lake** | Apache Parquet & DuckDB | Snappy Columnar / DuckDB 1.5+ | Sub-10ms serverless vectorized SQL scans over date partitions (448x speedup). |
+| **Anomaly Detection** | Scikit-Learn | Isolation Forest + Z-Scores | Multi-tier unsupervised ML, dynamic statistical baseline, and SCADA guardrails. |
+| **Predictive AI** | Scikit-Learn | Random Forest & Fourier Encodings | Chronologically trained 24-hour recursive load forecasting with 95% CI bands. |
+| **Demand Response** | Rule Engine | 3-Tier Peak Shaving | Prescriptive HVAC duty cycling, facility setback, and BESS injection. |
+| **Alert Dispatcher** | Webhook Engine | Slack / Discord / HTTP JSON | Asynchronous incident card delivery for peak breaches and critical SCADA faults. |
+| **Presentation** | Streamlit & Altair | Modern Fragment API | Zero-flicker live streaming view, Lakehouse Explorer, and AI Dispatch console. |
+| **Orchestration** | Docker Compose | Compose v2 | Containerized KRaft Kafka, Kafka-UI, and Dockerized Spark runner. |
+
+---
+
+## 11. Phase 6: Predictive AI & Automated Dispatch Architecture
+
+```mermaid
+flowchart TD
+    subgraph DATA_SOURCE ["Historical Cold Data Source"]
+        PARQUET["Partitioned Parquet Data Lake<br/>data/lake/raw_telemetry/"]
+    end
+
+    subgraph AI_PIPELINE ["Predictive AI Engine (analysis/forecaster.py)"]
+        ENG["Feature Engineering:<br/>• Cyclical Harmonics: sin/cos(hour/24), sin/cos(day/7)<br/>• Autoregressive Lags: lag_1, lag_24<br/>• Calendar Indicators: is_weekend"]
+        CHRON["Strict Chronological Split<br/>(80% Train, 20% Test)"]
+        MODELS["Model Tournament:<br/>1. Ridge Regressor (Baseline)<br/>2. Random Forest Regressor (Selected: RMSE 97.6 kW, MAPE 11.5%)"]
+        PRED["24-Hour Recursive Inference<br/>• Hourly Forecast Point<br/>• 95% Confidence Interval (± 1.96 × RMSE)"]
+        
+        PARQUET --> ENG --> CHRON --> MODELS --> PRED
+    end
+
+    subgraph DISPATCH_CORE ["Automated Dispatch Engine (analysis/dispatch_engine.py)"]
+        THRESH{"Forecast Load > Contract Threshold<br/>(e.g., 780 - 850 kW)?"}
+        PRED --> THRESH
+
+        subgraph TIERS ["3-Tier Automated Peak-Shaving Countermeasures"]
+            T1["Tier 1: Soft Facility Setback<br/>Dim OAT & Event Lighting, Pause EV Chargers<br/>(Shed: up to 45 kW)"]
+            T2["Tier 2: Chiller Duty-Cycling<br/>15-Min AHU Intermission Cycling (LT1, LT2, Academic)<br/>(Shed: up to 90 kW)"]
+            T3["Tier 3: Powerhouse BESS Injection<br/>Discharge 500 kWh LiFePO4 Battery Inverter<br/>(Injection: up to 160 kW)"]
+        end
+
+        THRESH -->|Yes| T1
+        THRESH -->|Overload > 45 kW| T2
+        THRESH -->|Overload > 135 kW| T3
+        THRESH -->|No| NOM["Nominal Operation (No Shedding Required)"]
+    end
+
+    subgraph NOTIFICATION ["Automated Webhook Dispatcher (consumer/webhook_dispatcher.py)"]
+        WH["Webhook Engine"]
+        T1 -.->|Incident Payload| WH
+        T2 -.->|Incident Payload| WH
+        T3 -.->|Incident Payload| WH
+        SLACK["Slack / Discord Webhooks"]
+        TEAMS["MS Teams / HTTP Webhooks"]
+        AUDIT["Local Audit Trail (tmp/webhook_dispatch_history.json)"]
+        WH --> SLACK
+        WH --> TEAMS
+        WH --> AUDIT
+    end
+
+    subgraph DASHBOARD ["Streamlit Dashboard UI (Tab 2: Phase 6 AI Forecasting)"]
+        UI_PLOT["Altair 24h Horizon Chart<br/>(Forecast Line, Confidence Ribbon, Dispatched Profile, Limit Rule)"]
+        UI_ACTION["Directives Panel (Tier Action Cards & ARMED Badges)"]
+        UI_WH["Webhook Console & Simulation Trigger"]
+        PRED --> UI_PLOT
+        TIERS --> UI_ACTION
+        AUDIT --> UI_WH
+    end
+```
