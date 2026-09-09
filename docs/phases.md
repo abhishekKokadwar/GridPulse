@@ -25,6 +25,7 @@ The platform has completed **Phases 1, 2, 3, 4, 5, and 6**. High-frequency telem
 | **Phase 5** | **Data Lakehouse Storage & Cold Path Analytics** | Apache Parquet, Snappy, DuckDB, PyArrow, Compaction Engine | **Completed** | Partitioned time-series Parquet lake (`year/month/day`), DuckDB vector SQL (400x+ faster), micro-batch compactor |
 | **Phase 6** | **Predictive AI, Forecasting & Automated Dispatch** | Scikit-Learn, Random Forest, Fourier Cyclical Encodings, Webhooks | **Completed** | 24h ahead load forecast (95% CI), 3-tier automated peak-shaving dispatch, webhook alerts |
 | **Phase 7** | **Enterprise Medallion Lakehouse & dbt ELT** | dbt-duckdb, DuckDB, Parquet, Jinja, Data Contracts | **Completed** | Bronze/Silver/Gold layered models, 34 data contract assertions, dimensional enrichment, curated analytical marts |
+| **Phase 8** | **ACID Lakehouse Table Format (Delta Lake)** | deltalake, DuckDB, PyArrow, Rust ACID Log | **Completed** | Atomic commits (_delta_log), time-travel snapshots, schema evolution (ambient_temp_c), in-place OPTIMIZE compaction |
 
 ---
 
@@ -197,7 +198,26 @@ timeline
 
 ---
 
-## 📋 Execution & Verification Runbook (Phase 6 & 7 Full Platform Stack)
+### 🟢 Phase 8: Enterprise ACID Lakehouse Table Format (Delta Lake + DuckDB)
+- **Objective:** Upgrade the storage foundation from raw Parquet files into a production-grade **ACID Table Format (Delta Lake)**, enabling atomic transactions, time-travel snapshot auditing, schema evolution, and in-place compaction.
+- **Implemented Components:**
+  - **Delta Lake Storage Engine ([`analysis/delta_lakehouse.py`](file:///d:/SEM%207/IOTBD/GridPulse/analysis/delta_lakehouse.py)):**
+    - Built [`DeltaLakehouseManager`](file:///d:/SEM%207/IOTBD/GridPulse/analysis/delta_lakehouse.py) interfacing the Rust-backed `deltalake` Python engine with DuckDB.
+    - **ACID Transaction Log:** Every operation writes atomic JSON commit logs to `_delta_log/` (`00000000000000000000.json`), guaranteeing zero dirty/partial reads during streaming writes.
+    - **Schema Evolution:** Non-destructive addition of weather station sensors (`ambient_temp_c`, `humidity_pct`) via `schema_mode='merge'`. Historical snapshots seamlessly project `NULL` values without requiring expensive full-dataset rewrites.
+    - **Time-Travel Snapshots:** Zero-copy vectorized DuckDB SQL execution across any historical snapshot (`dt.load_as_version(v)` or timestamp).
+    - **In-Place File Compaction (`OPTIMIZE`):** Native Delta compaction (`dt.optimize.compact()`) coalescing fragmented micro-batch part files and recording `OPTIMIZE` commits in the transaction log.
+    - **Snapshot Diffing:** Automated comparison between historical snapshots (`compare_snapshots(v0, v1)`) tracking row counts, schema mutations, and column additions.
+  - **Automated Test Suite ([`tests/test_delta_lakehouse.py`](file:///d:/SEM%207/IOTBD/GridPulse/tests/test_delta_lakehouse.py)):**
+    - 7 comprehensive unit/integration tests validating table initialization, ACID logs, schema evolution, time travel, in-place compaction, and DuckDB SQL.
+  - **Interactive ACID Lakehouse UI ([`dashboard/app.py`](file:///d:/SEM%207/IOTBD/GridPulse/dashboard/app.py)):**
+    - Time-Travel slider to inspect grid state at any version snapshot.
+    - One-click triggers for schema evolution and in-place compaction.
+    - Live Delta transaction audit trail table.
+
+---
+
+## 📋 Execution & Verification Runbook (Phase 6, 7 & 8 Full Platform Stack)
 
 To run and verify the complete GridPulse platform end-to-end:
 

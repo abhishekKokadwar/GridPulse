@@ -16,6 +16,7 @@ data/lake/checkpoints/
 data/lake/raw_telemetry/_spark_metadata/
 data/lakehouse/*.duckdb*
 data/lakehouse/*.wal
+data/lakehouse/delta/
 dbt_lakehouse/target/
 dbt_lakehouse/dbt_packages/
 dbt_lakehouse/logs/

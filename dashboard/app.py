@@ -56,6 +56,7 @@ from analysis.lake_analytics import (
 )
 from scripts.run_dbt import run_pipeline
 from scripts.compact_lake import run_compaction
+from analysis.delta_lakehouse import get_delta_lakehouse
 from analysis.forecaster import LoadForecaster
 from analysis.dispatch_engine import evaluate_dispatch_plan
 from consumer.webhook_dispatcher import (
@@ -638,6 +639,79 @@ with tab_lakehouse:
                 elif "fct_hourly_facility_demand" in mart_choice:
                     df_hr = marts["fct_hourly_facility_demand"]
                     st.dataframe(df_hr.head(100), use_container_width=True, hide_index=True)
+
+        # 5. Enterprise ACID Lakehouse: Delta Lake Format, Time Travel & Schema Evolution
+        st.markdown("---")
+        st.subheader("🧊 Enterprise ACID Lakehouse (Delta Lake Table Format)")
+        st.caption("ACID Transactions, Time-Travel Auditing, Non-Destructive Schema Evolution, and In-Place Compaction.")
+
+        delta_mgr = get_delta_lakehouse()
+        if not delta_mgr.is_initialized():
+            st.info("Delta Lake table not yet initialized. Click below to convert cold-path Parquet into an ACID Delta Table.")
+            if st.button("🚀 Initialize ACID Delta Table from Parquet", use_container_width=True):
+                with st.spinner("Converting partitioned Parquet lake to ACID Delta Lake format..."):
+                    init_res = delta_mgr.initialize_from_parquet()
+                    st.success(f"Initialized Delta Lake table with {init_res['total_records']:,} records in {init_res['elapsed_sec']}s!")
+                    time.sleep(1)
+                    st.rerun()
+        else:
+            dt = delta_mgr.get_table()
+            current_v = dt.version()
+            commit_history = delta_mgr.get_commit_history()
+            fields = [f.name for f in dt.schema().fields]
+            has_temp = "ambient_temp_c" in fields
+
+            # Top ACID Metrics Bar
+            c_d1, c_d2, c_d3, c_d4 = st.columns(4)
+            with c_d1:
+                st.metric("Latest ACID Version", f"v{current_v}")
+            with c_d2:
+                st.metric("Total Commits", f"{len(commit_history)} commits")
+            with c_d3:
+                st.metric("Active Schema Fields", f"{len(fields)} fields", delta="ambient_temp_c active" if has_temp else "Standard 12 fields")
+            with c_d4:
+                st.metric("ACID Log Format", "Delta 1.6 / JSON", delta="DuckDB Zero-Copy")
+
+            # Operational Action Controls
+            col_d_act1, col_d_act2 = st.columns(2)
+            with col_d_act1:
+                if st.button("🧬 Ingest Schema-Evolved Batch (+ambient_temp_c)", use_container_width=True):
+                    with st.spinner("Appending micro-batch with dynamic schema evolution (schema_mode='merge')..."):
+                        evolve_res = delta_mgr.simulate_schema_evolution()
+                        st.success(f"Committed Version v{evolve_res['new_version']} with new sensor columns: ambient_temp_c, humidity_pct!")
+                        time.sleep(1)
+                        st.rerun()
+            with col_d_act2:
+                if st.button("🧹 Run In-Place Compaction (OPTIMIZE)", use_container_width=True):
+                    with st.spinner("Consolidating fragmented part files with native Delta OPTIMIZE..."):
+                        compact_res = delta_mgr.optimize_and_compact()
+                        st.success(f"Compacted to Version v{compact_res['new_version']} in {compact_res['elapsed_sec']}s!")
+                        time.sleep(1)
+                        st.rerun()
+
+            # Time-Travel Historical Explorer
+            st.markdown("#### ⏱️ Time-Travel Snapshot Auditing (Zero-Copy DuckDB)")
+            st.caption("Inspect and query previous states of the electrical grid before schema mutations or compaction.")
+            
+            selected_v = st.slider("Select Historical Snapshot Version", 0, max(0, current_v), current_v, key="time_travel_slider")
+            
+            df_snap, meta_snap = delta_mgr.query_time_travel(version=selected_v, limit=200)
+            
+            col_s1, col_s2 = st.columns([1, 2])
+            with col_s1:
+                st.info(
+                    f"**Snapshot Version:** `v{selected_v}`  \n"
+                    f"**Total Records:** `{meta_snap.get('total_rows', len(df_snap)):,}`  \n"
+                    f"**Query Scan Latency:** `{meta_snap.get('elapsed_ms', 0)} ms`  \n"
+                    f"**IoT Weather Sensor:** {'✅ Active (`ambient_temp_c`)' if meta_snap.get('has_temperature_sensor') else '❌ Not yet introduced in this version'}"
+                )
+            with col_s2:
+                st.dataframe(df_snap.head(50), use_container_width=True, hide_index=True)
+
+            # Audit History Log Table
+            with st.expander("📜 Delta Lake Transaction Audit Log (_delta_log/*.json)", expanded=False):
+                if commit_history:
+                    st.dataframe(pd.DataFrame(commit_history), use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
 # Tab 2: Phase 6 AI Forecasting & Automated Dispatch
