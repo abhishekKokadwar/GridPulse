@@ -83,7 +83,7 @@ def get_lake_metadata(lake_path: str = DEFAULT_LAKE_PATH) -> Dict[str, Any]:
                 MAX(timestamp) as max_ts,
                 COUNT(DISTINCT meter_id) as meters_count,
                 COUNT(DISTINCT building_id) as buildings_count
-            FROM read_parquet('{glob_pattern}', hive_partitioning=1)
+            FROM read_parquet('{glob_pattern}', hive_partitioning=1, union_by_name=true)
         """
         res = con.execute(query).fetchone()
         total_records = res[0] or 0
@@ -152,7 +152,7 @@ def query_lake_telemetry(
             voltage_v,
             current_a,
             power_factor
-        FROM read_parquet('{glob_pattern}', hive_partitioning=1)
+        FROM read_parquet('{glob_pattern}', hive_partitioning=1, union_by_name=true)
         WHERE {where_sql}
         ORDER BY timestamp DESC
         LIMIT {limit}
@@ -199,7 +199,7 @@ def query_lake_hourly_profile(
             ROUND(AVG(voltage_v), 2) as avg_voltage_v,
             ROUND(AVG(power_factor), 3) as avg_power_factor,
             COUNT(*) as reading_count
-        FROM read_parquet('{glob_pattern}', hive_partitioning=1)
+        FROM read_parquet('{glob_pattern}', hive_partitioning=1, union_by_name=true)
         WHERE {where_sql}
         GROUP BY 1
         ORDER BY 1
@@ -231,7 +231,7 @@ def query_lake_building_summary(lake_path: str = DEFAULT_LAKE_PATH) -> pd.DataFr
             ROUND(MAX(power_kw), 2) as max_power_kw,
             ROUND(SUM(power_kw * (15.0 / 60.0)), 2) as est_total_kwh,
             COUNT(*) as total_readings
-        FROM read_parquet('{glob_pattern}', hive_partitioning=1)
+        FROM read_parquet('{glob_pattern}', hive_partitioning=1, union_by_name=true)
         GROUP BY building_id, building_type
         ORDER BY avg_power_kw DESC
     """
@@ -262,7 +262,7 @@ def benchmark_query_performance(lake_path: str = DEFAULT_LAKE_PATH) -> Dict[str,
         t0 = time.time()
         sql = f"""
             SELECT building_type, COUNT(*), AVG(power_kw), MAX(power_kw)
-            FROM read_parquet('{glob_pattern}', hive_partitioning=1)
+            FROM read_parquet('{glob_pattern}', hive_partitioning=1, union_by_name=true)
             GROUP BY building_type
         """
         res = con.execute(sql).fetchall()
@@ -310,7 +310,7 @@ def query_lake(sql_query: str, lake_path: str = DEFAULT_LAKE_PATH) -> pd.DataFra
     try:
         con.execute(f"""
             CREATE OR REPLACE VIEW telemetry_lake AS 
-            SELECT * FROM read_parquet('{glob_pattern}', hive_partitioning=1);
+            SELECT * FROM read_parquet('{glob_pattern}', hive_partitioning=1, union_by_name=true);
         """)
         return con.execute(sql_query).df()
     finally:

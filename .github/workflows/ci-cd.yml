@@ -26,6 +26,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Seed Historical Sample Telemetry for Verification
+        run: |
+          python simulator/simulator.py
+
       - name: Run 14/14 Automated Unit Test Suite
         run: |
           python -m unittest discover -s tests -v

@@ -231,7 +231,12 @@ if data_source_mode.startswith("🐘") and db_connected:
     )
     df_alerts_db = load_alerts_from_db(limit=500)
 else:
-    df_all = load_energy_data(RAW_DATA_PATH)
+    try:
+        df_all = load_energy_data(RAW_DATA_PATH)
+    except FileNotFoundError:
+        os.makedirs(os.path.dirname(RAW_DATA_PATH), exist_ok=True)
+        generate_historical_batch(days=1, interval_minutes=60, output_path=RAW_DATA_PATH, save_to_db=False, overwrite_csv=True)
+        df_all = load_energy_data(RAW_DATA_PATH)
     df_filtered = df_all.copy()
     if selected_cat != "All Categories":
         df_filtered = df_filtered[df_filtered["building_type"] == selected_cat]
