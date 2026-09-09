@@ -317,6 +317,39 @@ def query_lake(sql_query: str, lake_path: str = DEFAULT_LAKE_PATH) -> pd.DataFra
         con.close()
 
 
+DEFAULT_MEDALLION_PATH = os.path.join(PROJECT_ROOT, "data", "lakehouse", "gridpulse_medallion.duckdb")
+
+
+def get_medallion_db_path() -> str:
+    """Returns absolute path to the dbt-duckdb Medallion lakehouse database."""
+    return DEFAULT_MEDALLION_PATH
+
+
+def query_medallion_marts() -> Dict[str, pd.DataFrame]:
+    """
+    Queries the curated Gold and Silver marts from the Medallion DuckDB database.
+    """
+    db_path = get_medallion_db_path()
+    if not os.path.exists(db_path):
+        return {}
+    con = duckdb.connect(db_path, read_only=True)
+    try:
+        dim_efficiency = con.execute("SELECT * FROM gold.dim_facility_efficiency ORDER BY category, load_factor DESC").df()
+        daily_dispatch = con.execute("SELECT * FROM gold.fct_daily_campus_dispatch ORDER BY dispatch_date DESC").df()
+        hourly_demand = con.execute("SELECT * FROM gold.fct_hourly_facility_demand ORDER BY hour_timestamp DESC LIMIT 500").df()
+        return {
+            "dim_facility_efficiency": dim_efficiency,
+            "fct_daily_campus_dispatch": daily_dispatch,
+            "fct_hourly_facility_demand": hourly_demand,
+        }
+    except Exception as e:
+        print(f"[MEDALLION QUERY ERROR] {e}")
+        return {}
+    finally:
+        con.close()
+
+
+
 
 if __name__ == "__main__":
     print("[LAKE ANALYTICS ENGINE TEST]")

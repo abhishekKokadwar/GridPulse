@@ -14,5 +14,12 @@ data/raw/
 data/processed/
 data/lake/checkpoints/
 data/lake/raw_telemetry/_spark_metadata/
+data/lakehouse/*.duckdb*
+data/lakehouse/*.wal
+dbt_lakehouse/target/
+dbt_lakehouse/dbt_packages/
+dbt_lakehouse/logs/
+dbt_lakehouse/.user.yml
 tmp/
+
 

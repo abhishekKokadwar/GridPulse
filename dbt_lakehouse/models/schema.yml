@@ -1,0 +1,145 @@
+version: 2
+
+seeds:
+  - name: seed_buildings
+    description: "Master dimensional catalog of 22 campus facilities, categories, and peak capacities."
+    columns:
+      - name: building_id
+        description: "Primary key identifier for facility."
+        tests:
+          - unique
+          - not_null
+      - name: category
+        description: "Campus functional category."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Hostels', 'Departments', 'Lecture Theatres', 'Facilities']
+      - name: peak_capacity_kw
+        description: "Substation transformer rated peak capacity."
+        tests:
+          - not_null
+
+  - name: seed_meters
+    description: "Catalog of 42 IoT sub-meters installed across campus infrastructure."
+    columns:
+      - name: meter_id
+        description: "Unique sub-meter hardware identifier (M001-M042)."
+        tests:
+          - unique
+          - not_null
+      - name: building_id
+        description: "Foreign key reference to parent facility."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('seed_buildings')
+              field: building_id
+      - name: status
+        description: "Operating status of meter."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ACTIVE', 'INACTIVE', 'MAINTENANCE']
+
+models:
+  - name: bronze_raw_telemetry
+    description: "Raw telemetry view over partitioned Snappy Parquet data lake."
+    columns:
+      - name: event_id
+        description: "Telemetry ingestion event ID."
+        tests:
+          - not_null
+      - name: timestamp
+        description: "Measurement epoch timestamp."
+        tests:
+          - not_null
+
+  - name: silver_telemetry_clean
+    description: "Cleaned, deduplicated, and dimensional enriched IoT telemetry table."
+    columns:
+      - name: event_id
+        description: "Unique event identifier."
+        tests:
+          - not_null
+      - name: timestamp
+        description: "Measurement timestamp."
+        tests:
+          - not_null
+      - name: meter_id
+        description: "Foreign key to meter dimension."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_meters')
+              field: meter_id
+      - name: building_id
+        description: "Foreign key to building dimension."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_buildings')
+              field: building_id
+      - name: power_kw
+        description: "Active power consumption in kW."
+        tests:
+          - not_null
+      - name: voltage_v
+        description: "Line voltage in Volts."
+        tests:
+          - not_null
+      - name: power_factor
+        description: "Electrical power factor."
+        tests:
+          - not_null
+
+  - name: fct_hourly_facility_demand
+    description: "Hourly energy accounting and peak demand aggregated by facility."
+    columns:
+      - name: hourly_facility_id
+        description: "Surrogate primary key: md5(hour_timestamp + building_id)."
+        tests:
+          - unique
+          - not_null
+      - name: building_id
+        description: "Building identifier."
+        tests:
+          - not_null
+      - name: hour_timestamp
+        description: "Hourly window start time."
+        tests:
+          - not_null
+      - name: avg_power_kw
+        description: "Average demand in kW during hourly window."
+        tests:
+          - not_null
+
+  - name: fct_daily_campus_dispatch
+    description: "Daily campus peak demand, contract limit analysis, and peak shaving dispatch tier."
+    columns:
+      - name: dispatch_date
+        description: "Date of dispatch window."
+        tests:
+          - unique
+          - not_null
+      - name: peak_campus_demand_kw
+        description: "Peak campus aggregated load."
+        tests:
+          - not_null
+
+  - name: dim_facility_efficiency
+    description: "Facility load factor and intra-category efficiency ranking."
+    columns:
+      - name: building_id
+        description: "Unique building identifier."
+        tests:
+          - unique
+          - not_null
+      - name: category
+        description: "Facility category."
+        tests:
+          - not_null
+      - name: load_factor
+        description: "Facility load factor (avg_demand / peak_demand)."
+        tests:
+          - not_null

@@ -1,0 +1,37 @@
+name: 'gridpulse_lakehouse'
+version: '1.0.0'
+config-version: 2
+
+profile: 'gridpulse_lakehouse'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+vars:
+  raw_telemetry_glob: "data/lake/raw_telemetry/**/*.parquet"
+  contract_demand_kw: 800.0
+  demand_charge_penalty_rate_inr: 750.0
+
+seeds:
+  gridpulse_lakehouse:
+    +schema: silver
+
+models:
+  gridpulse_lakehouse:
+    bronze:
+      +materialized: view
+      +schema: bronze
+    silver:
+      +materialized: table
+      +schema: silver
+    gold:
+      +materialized: table
+      +schema: gold

@@ -22,6 +22,7 @@ The platform evolves through **6 architectural phases**, transitioning from synt
 | **Phase 4** | **Distributed Stream Processing** | ✅ Complete | Apache Spark 3.5, PySpark, Docker | 5-min sliding windows (1-min slide, 2-min watermark), 15s triggers, zero-flicker UI |
 | **Phase 5** | **Data Lakehouse Storage & Cold Path** | ✅ Complete | Apache Parquet, Snappy, DuckDB | Partitioned time-series lake (`year/month/day`), DuckDB vector SQL (448x faster), compactor |
 | **Phase 6** | **Predictive AI & Automated Dispatch** | ✅ Complete | Scikit-Learn, Random Forest, Webhooks | 24h recursive load forecasting, 3-tier peak-shaving dispatch, automated incident webhooks |
+| **Phase 7** | **Enterprise Medallion Lakehouse & dbt** | ✅ Complete | dbt-duckdb, DuckDB, Jinja, Data Contracts | Bronze/Silver/Gold ELT models, 34 data contract assertions, dimensional enrichment, curated analytical marts |
 
 ---
 
@@ -95,17 +96,24 @@ streamlit run dashboard/app.py
 ```
 *Navigate to `http://localhost:8501` to view:*
 - **⚡ Tab 0 (Phase 4):** Live sliding-window stream with zero page flicker via `@st.fragment`.
-- **🧊 Tab 1 (Phase 5):** Columnar Data Lakehouse Explorer & on-demand micro-batch compactor.
+- **🧊 Tab 1 (Phase 5 & 7):** Columnar Data Lakehouse Explorer & Medallion Architecture with dbt Gold Marts.
 - **🔮 Tab 2 (Phase 6):** 24-Hour AI Predictive Load Forecast, Automated Peak-Shaving Directives, and Webhook Dispatcher Console.
+
+### 5. Execute dbt Medallion Lakehouse ELT Pipeline
+Trigger automated Bronze ➔ Silver ➔ Gold transformations with 34 automated contract assertion tests:
+```powershell
+python scripts/run_dbt.py --all
+```
 
 ---
 
 ## 🧪 Automated Testing
 
-Run the automated test suite covering all 6 phases:
+Run the automated test suite covering all 7 architectural phases:
 ```powershell
-python -m unittest discover -s tests
+python -m unittest discover -s tests -v
 ```
+- ✅ `test_dbt.py`: Medallion layers compilation, 34 schema contract tests, DuckDB objects verification, and Gold mart KPIs sanity.
 - ✅ `test_simulator.py`: Physics calculations, electrical conversions, campus topology.
 - ✅ `test_lakehouse.py`: Parquet lake metadata extraction, DuckDB partition queries, compaction engine.
 - ✅ `test_forecasting.py`: Chronological train/test split, model evaluation, 24-hour forecast array & confidence intervals.

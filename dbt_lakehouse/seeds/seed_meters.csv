@@ -1,0 +1,43 @@
+meter_id,building_id,meter_type,status
+M001,BH1,Smart Sub-Meter,ACTIVE
+M002,BH1,Smart Sub-Meter,ACTIVE
+M003,BH1,Smart Sub-Meter,ACTIVE
+M004,BH2,Smart Sub-Meter,ACTIVE
+M005,BH2,Smart Sub-Meter,ACTIVE
+M006,BH2,Smart Sub-Meter,ACTIVE
+M007,BH3,Smart Sub-Meter,ACTIVE
+M008,BH3,Smart Sub-Meter,ACTIVE
+M009,BH3,Smart Sub-Meter,ACTIVE
+M010,BH4,Smart Sub-Meter,ACTIVE
+M011,BH4,Smart Sub-Meter,ACTIVE
+M012,BH4,Smart Sub-Meter,ACTIVE
+M013,GH,Smart Sub-Meter,ACTIVE
+M014,GH,Smart Sub-Meter,ACTIVE
+M015,GH,Smart Sub-Meter,ACTIVE
+M016,IVH,Smart Sub-Meter,ACTIVE
+M017,IVH,Smart Sub-Meter,ACTIVE
+M018,IVH,Smart Sub-Meter,ACTIVE
+M019,Satpura,Smart Sub-Meter,ACTIVE
+M020,Satpura,Smart Sub-Meter,ACTIVE
+M021,Satpura,Smart Sub-Meter,ACTIVE
+M022,Management,Smart Sub-Meter,ACTIVE
+M023,IT,Smart Sub-Meter,ACTIVE
+M024,CS,Smart Sub-Meter,ACTIVE
+M025,EEE,Smart Sub-Meter,ACTIVE
+M026,Engineering Science,Smart Sub-Meter,ACTIVE
+M027,GEN-LAB,Smart Sub-Meter,ACTIVE
+M028,LT1,Smart Sub-Meter,ACTIVE
+M029,LT1,Smart Sub-Meter,ACTIVE
+M030,LT2,Smart Sub-Meter,ACTIVE
+M031,LT2,Smart Sub-Meter,ACTIVE
+M032,Convention Center,Smart Sub-Meter,ACTIVE
+M033,Convention Center,Smart Sub-Meter,ACTIVE
+M034,SC,Smart Sub-Meter,ACTIVE
+M035,SC,Smart Sub-Meter,ACTIVE
+M036,Academic Block,Smart Sub-Meter,ACTIVE
+M037,Academic Block,Smart Sub-Meter,ACTIVE
+M038,Library,Smart Sub-Meter,ACTIVE
+M039,Library,Smart Sub-Meter,ACTIVE
+M040,Cafeteria,Smart Sub-Meter,ACTIVE
+M041,Powerhouse,Smart Sub-Meter,ACTIVE
+M042,OAT,Smart Sub-Meter,ACTIVE

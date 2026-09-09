@@ -30,7 +30,11 @@ jobs:
         run: |
           python simulator/simulator.py
 
-      - name: Run 14/14 Automated Unit Test Suite
+      - name: Run dbt-duckdb Medallion Lakehouse Pipeline
+        run: |
+          python scripts/run_dbt.py --all
+
+      - name: Run Automated Unit & Medallion Test Suite
         run: |
           python -m unittest discover -s tests -v
 

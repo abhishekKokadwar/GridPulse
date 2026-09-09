@@ -1,0 +1,23 @@
+building_id,building_name,category,peak_capacity_kw,zone
+BH1,BH1,Hostels,120.0,North Campus
+BH2,BH2,Hostels,120.0,North Campus
+BH3,BH3,Hostels,120.0,North Campus
+BH4,BH4,Hostels,120.0,North Campus
+GH,GH,Hostels,140.0,North Campus
+IVH,IVH,Hostels,80.0,North Campus
+Satpura,Satpura,Hostels,130.0,North Campus
+Management,Management,Departments,90.0,Central Zone
+IT,IT,Departments,150.0,Technology Block
+CS,CS,Departments,160.0,Technology Block
+EEE,EEE,Departments,140.0,Engineering Zone
+Engineering Science,Engineering Science,Departments,110.0,Engineering Zone
+GEN-LAB,GEN-LAB,Departments,130.0,Research Wing
+LT1,LT1,Lecture Theatres,100.0,Academic Quad
+LT2,LT2,Lecture Theatres,100.0,Academic Quad
+Convention Center,Convention Center,Facilities,180.0,South Complex
+SC,SC,Facilities,95.0,Central Zone
+Academic Block,Academic Block,Facilities,160.0,Academic Quad
+Library,Library,Facilities,110.0,Central Zone
+Cafeteria,Cafeteria,Facilities,65.0,Student Hub
+Powerhouse,Powerhouse,Facilities,250.0,Substation Grid
+OAT,OAT,Facilities,50.0,Cultural Zone

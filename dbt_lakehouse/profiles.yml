@@ -1,0 +1,7 @@
+gridpulse_lakehouse:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_DATABASE_PATH', 'data/lakehouse/gridpulse_medallion.duckdb') }}"
+      threads: 4

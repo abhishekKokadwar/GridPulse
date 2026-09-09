@@ -24,6 +24,7 @@ The platform has completed **Phases 1, 2, 3, 4, 5, and 6**. High-frequency telem
 | **Phase 4** | **Distributed Stream Processing & Window Analytics** | Apache Spark 3.5.0, PySpark, Docker, Streamlit Fragments | **Completed** | Sliding-window stream analytics (5m window/1m slide), 15s triggers, zero-flicker UI |
 | **Phase 5** | **Data Lakehouse Storage & Cold Path Analytics** | Apache Parquet, Snappy, DuckDB, PyArrow, Compaction Engine | **Completed** | Partitioned time-series Parquet lake (`year/month/day`), DuckDB vector SQL (400x+ faster), micro-batch compactor |
 | **Phase 6** | **Predictive AI, Forecasting & Automated Dispatch** | Scikit-Learn, Random Forest, Fourier Cyclical Encodings, Webhooks | **Completed** | 24h ahead load forecast (95% CI), 3-tier automated peak-shaving dispatch, webhook alerts |
+| **Phase 7** | **Enterprise Medallion Lakehouse & dbt ELT** | dbt-duckdb, DuckDB, Parquet, Jinja, Data Contracts | **Completed** | Bronze/Silver/Gold layered models, 34 data contract assertions, dimensional enrichment, curated analytical marts |
 
 ---
 
@@ -172,7 +173,31 @@ timeline
 
 ---
 
-## 📋 Execution & Verification Runbook (Phase 6 Full Platform Stack)
+### 🟢 Phase 7: Enterprise Medallion Lakehouse Architecture & dbt Transformations (Bronze ➔ Silver ➔ Gold)
+- **Objective:** Upgrade the flat cold-path Parquet lake into an enterprise-grade **Medallion Data Lakehouse** using **`dbt-duckdb`**, enforcing declarative ELT modeling, dimensional star-schema joins, strict electrical boundary data contracts, and curated analytical marts.
+- **Implemented Components:**
+  - **Medallion dbt Project ([`dbt_lakehouse/`](file:///d:/SEM%207/IOTBD/GridPulse/dbt_lakehouse)):**
+    - **Bronze Layer ([`bronze_raw_telemetry.sql`](file:///d:/SEM%207/IOTBD/GridPulse/dbt_lakehouse/models/bronze/bronze_raw_telemetry.sql)):** Zero-copy view over partitioned Parquet lake with automatic Hive partition pruning and audit lineage (`_ingested_at`).
+    - **Silver Dimensions ([`seeds/`](file:///d:/SEM%207/IOTBD/GridPulse/dbt_lakehouse/seeds)):** Master seed catalogs for 22 campus facilities ([`seed_buildings.csv`](file:///d:/SEM%207/IOTBD/GridPulse/dbt_lakehouse/seeds/seed_buildings.csv)) and 42 sub-meters ([`seed_meters.csv`](file:///d:/SEM%207/IOTBD/GridPulse/dbt_lakehouse/seeds/seed_meters.csv)), exposed via staging views `stg_buildings` and `stg_meters`.
+    - **Silver Curated Table ([`silver_telemetry_clean.sql`](file:///d:/SEM%207/IOTBD/GridPulse/dbt_lakehouse/models/silver/silver_telemetry_clean.sql)):** Window function deduplication (`ROW_NUMBER() OVER (PARTITION BY meter_id, timestamp ORDER BY event_id DESC)`), dimensional joins on facility & meter attributes, voltage anomaly clamping (180V–270V), and operational flags (`is_voltage_sag_swell`, `is_low_power_factor`).
+    - **Gold Analytical Mart 1 ([`dim_facility_efficiency.sql`](file:///d:/SEM%207/IOTBD/GridPulse/dbt_lakehouse/models/gold/dim_facility_efficiency.sql)):** Facility load factor (`avg_demand / peak_demand`), intra-category energy efficiency ranking, and contribution % to total campus peak demand across all 22 buildings.
+    - **Gold Analytical Mart 2 ([`fct_daily_campus_dispatch.sql`](file:///d:/SEM%207/IOTBD/GridPulse/dbt_lakehouse/models/gold/fct_daily_campus_dispatch.sql)):** Daily campus-wide peak demand, contract limit analysis (800.0 kW), overload calculation, demand penalty tariff exposure (INR 750/kW), and automated dispatch recommendations.
+    - **Gold Analytical Mart 3 ([`fct_hourly_facility_demand.sql`](file:///d:/SEM%207/IOTBD/GridPulse/dbt_lakehouse/models/gold/fct_hourly_facility_demand.sql)):** Hourly aggregated power demand, total kWh energy consumption, voltage stability, and low power factor incident counts.
+  - **Data Quality Contracts & Automated Tests ([`models/schema.yml`](file:///d:/SEM%207/IOTBD/GridPulse/dbt_lakehouse/models/schema.yml)):**
+    - 34 automated contract assertion tests enforcing:
+      - Primary key uniqueness & non-nullness (`event_id`, `building_id`, `meter_id`, `hourly_facility_id`).
+      - Referential integrity (`relationships` foreign key validation between telemetry, meters, and buildings).
+      - Categorical domain boundaries (`accepted_values` for building categories and meter operating statuses).
+  - **Pipeline Runner & Automated CI/CD ([`scripts/run_dbt.py`](file:///d:/SEM%207/IOTBD/GridPulse/scripts/run_dbt.py), [`tests/test_dbt.py`](file:///d:/SEM%207/IOTBD/GridPulse/tests/test_dbt.py)):**
+    - Programmatic `dbtRunner` execution with automated adapter connection recycling to prevent DuckDB single-writer file locks.
+    - 6 unit & integration tests verifying DuckDB database creation, table existence across schemas, and analytical KPI bounds.
+    - Integrated into GitHub Actions CI/CD ([`.github/workflows/ci-cd.yml`](file:///d:/SEM%207/IOTBD/GridPulse/.github/workflows/ci-cd.yml)).
+  - **Interactive Lakehouse Visualizer ([`dashboard/app.py`](file:///d:/SEM%207/IOTBD/GridPulse/dashboard/app.py)):**
+    - One-click pipeline runner and interactive Gold Mart analytics directly inside the Streamlit Operations Portal.
+
+---
+
+## 📋 Execution & Verification Runbook (Phase 6 & 7 Full Platform Stack)
 
 To run and verify the complete GridPulse platform end-to-end:
 
