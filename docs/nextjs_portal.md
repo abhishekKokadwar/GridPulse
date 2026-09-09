@@ -1,6 +1,6 @@
 # GridPulse Next.js 15 SCADA Real-Time Operations Portal
 
-The **Next.js Real-Time Operations Portal** is located in [`frontend/`](./).
+The **Next.js Real-Time Operations Portal** is located in [`frontend/`](file:///d:/SEM%207/IOTBD/GridPulse/frontend).
 
 This resolves the 1–2 second latency observed in Streamlit by replacing heavy server-side Python re-renders with high-throughput **Node.js PostgreSQL connection pooling** and a **60 FPS client-side React 19 / Recharts dashboard**.
 

@@ -5,69 +5,87 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const limit = Math.min(parseInt(searchParams.get('limit') || '80', 10), 500);
+  const limit = Math.min(parseInt(searchParams.get('limit') || '120', 10), 500);
 
   try {
-    const rows = await query(`
+    // 1. High-speed timeline query: deduplicates (window_end, building_id) and sums across all buildings per window
+    const timelineSql = `
+      WITH recent_windows AS (
+        SELECT window_end, building_id, avg_power_kw, avg_voltage_v, id
+        FROM building_energy_aggregates
+        WHERE window_end >= (SELECT MAX(window_end) - INTERVAL '40 minutes' FROM building_energy_aggregates)
+      ),
+      dedup AS (
+        SELECT DISTINCT ON (window_end, building_id)
+          window_end, avg_power_kw, avg_voltage_v
+        FROM recent_windows
+        ORDER BY window_end DESC, building_id, id DESC
+      )
       SELECT 
-        a.id,
-        a.window_start,
-        a.window_end,
-        a.building_id,
-        b.building_name,
-        b.category AS building_type,
-        CAST(a.avg_power_kw AS FLOAT) AS avg_power_kw,
-        CAST(a.avg_voltage_v AS FLOAT) AS avg_voltage_v,
-        CAST(a.avg_power_factor AS FLOAT) AS avg_power_factor
-      FROM building_energy_aggregates a
-      LEFT JOIN buildings b ON a.building_id = b.building_id
-      ORDER BY a.window_end DESC, a.id DESC
-      LIMIT $1
-    `, [limit]);
+        window_end,
+        ROUND(SUM(avg_power_kw)::numeric, 1) as total_power_kw,
+        ROUND(AVG(avg_voltage_v)::numeric, 1) as avg_voltage_v,
+        COUNT(*) as active_buildings
+      FROM dedup
+      GROUP BY window_end
+      ORDER BY window_end ASC
+      LIMIT 40;
+    `;
 
-    // Aggregate by window_end for high-speed 60fps charting
-    const timelineMap = new Map<string, { time: string; timestamp: string; totalPower: number; avgVoltage: number; count: number }>();
+    // 2. Latest deduplicated building rows for building cards and table
+    const rowsSql = `
+      WITH latest_buildings AS (
+        SELECT DISTINCT ON (a.building_id)
+          a.id,
+          a.window_start,
+          a.window_end,
+          a.building_id,
+          b.building_name,
+          b.category AS building_type,
+          CAST(a.avg_power_kw AS FLOAT) AS avg_power_kw,
+          CAST(a.avg_voltage_v AS FLOAT) AS avg_voltage_v,
+          CAST(a.avg_power_factor AS FLOAT) AS avg_power_factor
+        FROM building_energy_aggregates a
+        LEFT JOIN buildings b ON a.building_id = b.building_id
+        ORDER BY a.building_id, a.window_end DESC, a.id DESC
+      )
+      SELECT * FROM latest_buildings
+      ORDER BY avg_power_kw DESC;
+    `;
 
-    for (const r of rows) {
-      const rawIso = new Date(r.window_end).toISOString();
-      const timeKey = new Date(r.window_end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      if (!timelineMap.has(timeKey)) {
-        timelineMap.set(timeKey, { time: timeKey, timestamp: rawIso, totalPower: 0, avgVoltage: 0, count: 0 });
-      }
-      const entry = timelineMap.get(timeKey)!;
-      entry.totalPower += Number(r.avg_power_kw) || 0;
-      entry.avgVoltage += Number(r.avg_voltage_v) || 0;
-      entry.count += 1;
-    }
+    const [timelineRows, buildingRows] = await Promise.all([
+      query(timelineSql),
+      query(rowsSql),
+    ]);
 
-    const timeline = Array.from(timelineMap.values())
-      .map(e => ({
-        time: e.time,
-        timestamp: e.timestamp,
-        totalPower: Number(e.totalPower.toFixed(1)),
-        avgVoltage: Number((e.avgVoltage / (e.count || 1)).toFixed(1)),
-      }))
-      .reverse();
+    // Format timeline points for 60fps chart
+    const timeline = timelineRows.map((r: any) => {
+      const d = new Date(r.window_end);
+      return {
+        time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+        timestamp: d.toISOString(),
+        totalPower: Number(r.total_power_kw) || 0,
+        avgVoltage: Number(r.avg_voltage_v) || 230.0,
+      };
+    });
 
-    // Latest single window statistics
-    const latestWindowEnd = rows.length > 0 ? rows[0].window_end : null;
-    const latestWindowRows = latestWindowEnd ? rows.filter(r => r.window_end.toString() === latestWindowEnd.toString()) : [];
-    const latestLoad = latestWindowRows.reduce((acc, curr) => acc + (Number(curr.avg_power_kw) || 0), 0);
-    const latestVoltage = latestWindowRows.length > 0
-      ? latestWindowRows.reduce((acc, curr) => acc + (Number(curr.avg_voltage_v) || 0), 0) / latestWindowRows.length
-      : 230.0;
+    const latestWindowEnd = timelineRows.length > 0 ? timelineRows[timelineRows.length - 1].window_end : null;
+    const latestLoad = buildingRows.reduce((acc: number, curr: any) => acc + (Number(curr.avg_power_kw) || 0), 0);
+    const latestVoltage = buildingRows.length > 0
+      ? buildingRows.reduce((acc: number, curr: any) => acc + (Number(curr.avg_voltage_v) || 0), 0) / buildingRows.length
+      : 231.8;
 
     return NextResponse.json({
       success: true,
-      count: rows.length,
+      count: buildingRows.length,
       latest: {
         windowEnd: latestWindowEnd,
         loadKw: Number(latestLoad.toFixed(1)),
         voltageV: Number(latestVoltage.toFixed(1)),
-        activeBuildings: latestWindowRows.length,
+        activeBuildings: buildingRows.length,
       },
       timeline,
-      rows,
+      rows: buildingRows,
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {

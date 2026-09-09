@@ -22,6 +22,14 @@ import {
   ChevronRight,
   TrendingUp,
   Radio,
+  Search,
+  Download,
+  Info,
+  Check,
+  HelpCircle,
+  BarChart3,
+  Server,
+  ArrowUpRight,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -33,7 +41,6 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
-  Legend,
 } from 'recharts';
 
 interface StreamRow {
@@ -97,7 +104,7 @@ interface WebhookLog {
 }
 
 export default function ScadaDashboard() {
-  // Navigation
+  // Navigation: Clear, self-explanatory operational tabs
   const [activeTab, setActiveTab] = useState<'stream' | 'dispatch' | 'buildings' | 'table'>('stream');
 
   // Refresh Cadence
@@ -111,21 +118,23 @@ export default function ScadaDashboard() {
   const [kpiData, setKpiData] = useState<KpiResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Phase 6 Peak Demand Response interactive states
+  // Search & Filters
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [timeFilter, setTimeFilter] = useState<'15m' | '30m' | 'all'>('30m');
+  const [showInfoBanner, setShowInfoBanner] = useState<boolean>(true);
+
+  // Demand Response & Peak Shaving states
   const [contractThreshold, setContractThreshold] = useState<number>(800);
   const [tier1Armed, setTier1Armed] = useState<boolean>(true);
   const [tier2Armed, setTier2Armed] = useState<boolean>(true);
   const [tier3Armed, setTier3Armed] = useState<boolean>(false);
 
-  // Webhook states (empty string defaults to process.env.ALERT_WEBHOOK_URL on the server)
+  // Webhook states
   const [webhookUrl, setWebhookUrl] = useState<string>('');
   const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>([]);
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
-
-  // Time filters
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [timeFilter, setTimeFilter] = useState<'15m' | '30m' | 'all'>('30m');
 
   // Live Clock
   const [currentTime, setCurrentTime] = useState<string>('');
@@ -223,7 +232,7 @@ export default function ScadaDashboard() {
       const logEntry: WebhookLog = {
         id: Math.random().toString(36).substring(7),
         timestamp: new Date().toLocaleTimeString(),
-        type: type === 'PEAK_SHAVING' ? 'Peak Demand Countermeasure' : 'Voltage Sag Fault',
+        type: type === 'PEAK_SHAVING' ? 'Peak Demand Directive' : 'Voltage Sag Fault Alert',
         title: type === 'PEAK_SHAVING' ? `Impending Breach (+${projectedOverload.toFixed(1)} kW)` : 'CRITICAL VOLTAGE SAG at M012',
         status: data.status || 'SENT',
         statusCode: data.statusCode || 200,
@@ -233,7 +242,7 @@ export default function ScadaDashboard() {
       setWebhookLogs(prev => [logEntry, ...prev.slice(0, 19)]);
 
       if (data.success) {
-        showToast(`Dispatched to Slack Channel! (HTTP ${data.statusCode} in ${latency}ms)`, 'success');
+        showToast(`Delivered to Slack Channel! (HTTP ${data.statusCode} in ${latency}ms)`, 'success');
       } else {
         showToast(`Webhook delivery failed: ${data.message}`, 'error');
       }
@@ -247,31 +256,72 @@ export default function ScadaDashboard() {
   // Filtered rows for table & building cards
   const filteredRows = useMemo(() => {
     if (!streamData?.rows) return [];
-    if (selectedCategory === 'All') return streamData.rows;
-    return streamData.rows.filter(r => r.building_type === selectedCategory);
-  }, [streamData?.rows, selectedCategory]);
+    let list = streamData.rows;
+    if (selectedCategory !== 'All') {
+      list = list.filter(r => r.building_type === selectedCategory);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        r => r.building_name.toLowerCase().includes(q) || r.building_id.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [streamData?.rows, selectedCategory, searchQuery]);
 
-  // Filtered timeline data
+  // Filtered timeline data (provides smooth points)
   const filteredTimeline = useMemo(() => {
-    if (!streamData?.timeline) return [];
-    if (timeFilter === '15m') return streamData.timeline.slice(-10);
-    if (timeFilter === '30m') return streamData.timeline.slice(-20);
+    if (!streamData?.timeline || streamData.timeline.length === 0) return [];
+    if (timeFilter === '15m') return streamData.timeline.slice(-15);
+    if (timeFilter === '30m') return streamData.timeline.slice(-30);
     return streamData.timeline;
   }, [streamData?.timeline, timeFilter]);
 
-  // Building power distribution
+  // Building power distribution (Top 8 highest consumers)
   const buildingChartData = useMemo(() => {
     if (!streamData?.rows) return [];
     const map = new Map<string, number>();
-    for (const r of streamData.rows.slice(0, 42)) {
+    for (const r of streamData.rows) {
       const current = map.get(r.building_name) || 0;
       map.set(r.building_name, Math.max(current, r.avg_power_kw));
     }
     return Array.from(map.entries())
-      .map(([name, power]) => ({ name, power }))
+      .map(([name, power]) => ({ name, power: Number(power.toFixed(1)) }))
       .sort((a, b) => b.power - a.power)
-      .slice(0, 10);
+      .slice(0, 8);
   }, [streamData?.rows]);
+
+  // CSV Export utility
+  const exportCsv = () => {
+    if (!filteredRows || filteredRows.length === 0) return;
+    const headers = ['ID', 'Window Start', 'Window End', 'Building ID', 'Building Name', 'Category', 'Avg Power kW', 'Avg Voltage V', 'Power Factor'];
+    const csvContent = [
+      headers.join(','),
+      ...filteredRows.map(r =>
+        [
+          r.id,
+          `"${r.window_start}"`,
+          `"${r.window_end}"`,
+          `"${r.building_id}"`,
+          `"${r.building_name}"`,
+          `"${r.building_type}"`,
+          r.avg_power_kw,
+          r.avg_voltage_v,
+          r.avg_power_factor,
+        ].join(',')
+      ),
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `gridpulse_telemetry_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('Exported telemetry records to CSV', 'info');
+  };
 
   return (
     <div className="min-h-screen bg-[#090D16] text-slate-100 flex flex-col font-sans">
@@ -279,136 +329,169 @@ export default function ScadaDashboard() {
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 animate-bounce">
           <div
-            className={`px-5 py-3.5 rounded-xl glass-panel flex items-center gap-3 shadow-2xl border ${
+            className={`px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border text-xs font-semibold backdrop-blur-xl ${
               toastMessage.type === 'success'
-                ? 'border-emerald-500/50 bg-emerald-950/80 text-emerald-200'
+                ? 'bg-emerald-950/90 text-emerald-200 border-emerald-500/50'
                 : toastMessage.type === 'error'
-                ? 'border-red-500/50 bg-red-950/80 text-red-200'
-                : 'border-amber-500/50 bg-amber-950/80 text-amber-200'
+                ? 'bg-red-950/90 text-red-200 border-red-500/50'
+                : 'bg-amber-950/90 text-amber-200 border-amber-500/50'
             }`}
           >
-            {toastMessage.type === 'success' ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-            ) : (
-              <AlertTriangle className="w-5 h-5 text-amber-400" />
-            )}
-            <span className="text-sm font-semibold tracking-wide">{toastMessage.text}</span>
+            {toastMessage.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+            {toastMessage.type === 'error' && <AlertTriangle className="w-4 h-4 text-red-400" />}
+            {toastMessage.type === 'info' && <Info className="w-4 h-4 text-amber-400" />}
+            <span>{toastMessage.text}</span>
           </div>
         </div>
       )}
 
-      {/* TOP SCADA COMMAND BAR */}
-      <header className="border-b border-slate-800/80 bg-slate-950/60 backdrop-blur-xl sticky top-0 z-40 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
-        {/* Brand */}
+      {/* TOP SCADA CONTROL HEADER */}
+      <header className="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-xl sticky top-0 z-40 px-6 py-3 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center shadow-lg shadow-amber-500/20">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-400 flex items-center justify-center shadow-lg shadow-amber-500/20">
             <Zap className="w-6 h-6 text-slate-950 fill-current" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-                GridPulse SCADA
-                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 font-mono border border-amber-500/30">
-                  v2.0 NEXT.JS 15
+                GridPulse Operations Portal
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-mono border border-emerald-500/30">
+                  SCADA LIVE
                 </span>
               </h1>
             </div>
             <p className="text-xs text-slate-400">
-              Real-Time Campus Energy Telemetry • Neon Cloud (ap-southeast-1) • Sub-50ms React Engine
+              Smart Campus Microgrid Telemetry • 22 Buildings • 42 Sub-Meters • Neon Serverless Cloud
             </p>
           </div>
         </div>
 
-        {/* Center Live Sync & Clock */}
-        <div className="flex items-center gap-4 bg-slate-900/80 px-4 py-1.5 rounded-xl border border-slate-800">
+        {/* Live Status Indicators */}
+        <div className="flex items-center gap-3 bg-slate-900/80 px-4 py-1.5 rounded-xl border border-slate-800">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-            <span className="text-xs font-mono font-bold text-emerald-400">POSTGRES LIVE</span>
+            <span className="text-xs font-mono font-bold text-emerald-400">POSTGRES CLOUD</span>
           </div>
           <div className="h-4 w-px bg-slate-800" />
           <div className="text-xs text-slate-400 flex items-center gap-1.5 font-mono">
             <Clock className="w-3.5 h-3.5 text-slate-500" />
-            <span>UTC {currentTime || '00:00:00'}</span>
+            <span>{currentTime || '00:00:00'}</span>
           </div>
           <div className="h-4 w-px bg-slate-800" />
           <div className="text-xs font-mono text-slate-400">
-            Ping: <span className="text-amber-400 font-semibold">{pingLatency}ms</span>
+            Latency: <span className="text-amber-400 font-semibold">{pingLatency}ms</span>
           </div>
         </div>
 
-        {/* Right Controls */}
+        {/* Cadence Controls & Links */}
         <div className="flex items-center gap-3">
-          {/* Refresh selector */}
           <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-xs font-medium">
+            <span className="px-2 text-[11px] text-slate-500">Refresh:</span>
             {[
               { label: '1s', val: 1000 },
               { label: '3s', val: 3000 },
               { label: '5s', val: 5000 },
               { label: 'Pause', val: 0 },
-            ].map(cadence => (
+            ].map(item => (
               <button
-                key={cadence.label}
-                onClick={() => setRefreshInterval(cadence.val)}
+                key={item.label}
+                onClick={() => setRefreshInterval(item.val)}
                 className={`px-2.5 py-1 rounded-md transition-all ${
-                  refreshInterval === cadence.val
+                  refreshInterval === item.val
                     ? 'bg-amber-500 text-slate-950 font-bold shadow'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                {cadence.label}
+                {item.label}
               </button>
             ))}
           </div>
 
-          {/* Manual Refresh Button */}
           <button
             onClick={fetchData}
             disabled={isRefreshing}
             className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition disabled:opacity-50"
-            title="Manual sync"
+            title="Manual sync with Neon PostgreSQL"
           >
             <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-amber-400' : ''}`} />
           </button>
 
-          {/* External Streamlit link */}
           <a
-            href="http://localhost:8501"
+            href="https://share.streamlit.io"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-amber-300 transition"
           >
-            <span>Streamlit Studio</span>
+            <span>Analytics Studio</span>
             <ExternalLink className="w-3 h-3" />
           </a>
         </div>
       </header>
 
-      {/* TOP TELEMETRY METRIC CARDS */}
-      <section className="px-6 pt-6 pb-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Metric 1 */}
+      {/* ERROR NOTICE IF ANY */}
+      {errorMsg && (
+        <div className="mx-6 mt-4 p-3 rounded-xl bg-red-950/40 border border-red-800/60 text-xs text-red-300 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-400" />
+            <span>Connection Warning: {errorMsg}</span>
+          </div>
+          <button onClick={fetchData} className="underline hover:text-white font-mono">
+            Retry Connection
+          </button>
+        </div>
+      )}
+
+      {/* OPERATIONAL INSIGHT BANNER (DISMISSIBLE) */}
+      {showInfoBanner && (
+        <div className="mx-6 mt-4 p-4 rounded-2xl bg-gradient-to-r from-amber-950/30 via-slate-900/80 to-cyan-950/30 border border-amber-500/20 text-xs text-slate-300 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0">
+              <Info className="w-4 h-4 text-amber-400" />
+            </div>
+            <div>
+              <p className="font-semibold text-white">
+                Welcome to GridPulse: Autonomous Campus Microgrid & SCADA Command Center
+              </p>
+              <p className="text-slate-400 mt-0.5">
+                Monitoring 42 IoT sub-meters across 22 campus facilities. Use the tabs below to view real-time power telemetry, test AI peak-shaving dispatch, or inspect the facility electrical hierarchy.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowInfoBanner(false)}
+            className="text-slate-500 hover:text-slate-300 text-xs font-mono shrink-0 px-2 py-1 rounded-md hover:bg-slate-800 transition"
+          >
+            Dismiss ✕
+          </button>
+        </div>
+      )}
+
+      {/* TOP 4 KEY OPERATIONAL METRICS */}
+      <section className="px-6 pt-5 pb-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1: Total Campus Power Demand */}
         <div className="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-amber-500/50 transition-all">
           <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl -mr-10 -mt-10 group-hover:bg-amber-500/20 transition-all" />
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Instantaneous Campus Load
+              Total Campus Power Demand
             </span>
             <Flame className="w-4 h-4 text-amber-400" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-3xl font-extrabold tracking-tight text-white font-mono">
-              {currentTotalLoad.toFixed(1)}
+              {(streamData?.latest?.loadKw || kpiData?.instant?.instantaneousLoadKw || 304.8).toFixed(1)}
             </span>
             <span className="text-sm font-semibold text-amber-400">kW</span>
           </div>
           <div className="mt-3 flex items-center gap-2 text-xs">
             <span className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-300 font-mono font-medium">
-              ↑ +17.2 kW vs baseline
+              42 Sub-Meters Active
             </span>
-            <span className="text-slate-500">42 sub-meters</span>
+            <span className="text-slate-500">22 Campus Facilities</span>
           </div>
         </div>
 
-        {/* Metric 2 */}
+        {/* Card 2: Active Sub-Meters */}
         <div className="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-cyan-500/50 transition-all">
           <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl -mr-10 -mt-10 group-hover:bg-cyan-500/20 transition-all" />
           <div className="flex items-center justify-between">
@@ -421,73 +504,93 @@ export default function ScadaDashboard() {
             <span className="text-3xl font-extrabold tracking-tight text-white font-mono">
               {kpiData?.stats?.meters || 42}
             </span>
-            <span className="text-sm font-semibold text-cyan-400">Online</span>
+            <span className="text-sm font-semibold text-cyan-400">/ 42 Online</span>
           </div>
           <div className="mt-3 flex items-center gap-2 text-xs">
             <span className="px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-300 font-medium">
-              22 Campus Buildings
+              100% Telemetry Health
             </span>
-            <span className="text-slate-500">100% telemetry sync</span>
+            <span className="text-slate-500">4 Facility Zones</span>
           </div>
         </div>
 
-        {/* Metric 3 */}
+        {/* Card 3: Grid Voltage & Power Factor */}
         <div className="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-emerald-500/50 transition-all">
           <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl -mr-10 -mt-10 group-hover:bg-emerald-500/20 transition-all" />
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Nominal Bus Voltage
+              Grid Voltage & Power Factor
             </span>
             <Gauge className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-3xl font-extrabold tracking-tight text-white font-mono">
-              {(streamData?.latest?.voltageV || 232.1).toFixed(1)}
+              {(streamData?.latest?.voltageV || kpiData?.instant?.nominalVoltageV || 231.8).toFixed(1)}
             </span>
             <span className="text-sm font-semibold text-emerald-400">V</span>
           </div>
           <div className="mt-3 flex items-center gap-2 text-xs">
             <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 font-medium">
-              Standard: 230.0V (±1.5%)
+              PF: {(kpiData?.instant?.powerFactorAvg || 0.93).toFixed(2)} (Healthy)
             </span>
-            <span className="text-slate-500">PF: 0.929</span>
+            <span className="text-slate-500">Standard 230V Bus</span>
           </div>
         </div>
 
-        {/* Metric 4 */}
+        {/* Card 4: Demand Dispatch Status */}
         <div className="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-purple-500/50 transition-all">
           <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 rounded-full blur-2xl -mr-10 -mt-10 group-hover:bg-purple-500/20 transition-all" />
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Last Sliding Window End
+              Automated Dispatch Status
             </span>
             <Activity className="w-4 h-4 text-purple-400" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl font-extrabold tracking-tight text-white font-mono">
-              {streamData?.latest?.windowEnd
-                ? new Date(streamData.latest.windowEnd).toLocaleTimeString([], { hour12: false })
-                : '04:53:00'}
+              {projectedOverload > 0 ? 'CURTAILMENT' : 'NOMINAL'}
             </span>
-            <span className="text-xs font-semibold text-purple-400">5-min window</span>
+            <span className={`text-xs font-semibold ${projectedOverload > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+              {projectedOverload > 0 ? 'Demand Alert' : 'Within Limits'}
+            </span>
           </div>
           <div className="mt-3 flex items-center gap-2 text-xs">
             <span className="px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-300 font-mono font-medium">
-              {streamData?.count || 220} aggregates cached
+              Contract: {contractThreshold} kW
             </span>
-            <span className="text-slate-500">Auto 15s trigger</span>
+            <span className="text-slate-500">3-Tier Rules Armed</span>
           </div>
         </div>
       </section>
 
-      {/* NAVIGATION TABS */}
-      <section className="px-6 pt-4">
+      {/* SELF-EXPLANATORY NAVIGATION TABS */}
+      <section className="px-6 pt-3">
         <div className="flex items-center gap-2 border-b border-slate-800/80 pb-px overflow-x-auto">
           {[
-            { id: 'stream', label: '⚡ Phase 4: Real-Time Stream', icon: Radio },
-            { id: 'dispatch', label: '🔮 Phase 6: AI Forecasting & Webhook Dispatch', icon: Sliders },
-            { id: 'buildings', label: '🏢 Campus Infrastructure & Power Distribution', icon: Building2 },
-            { id: 'table', label: '🗂️ Live Aggregates Table', icon: Layers },
+            {
+              id: 'stream',
+              label: '⚡ Real-Time Power Telemetry',
+              desc: 'Live load curves & 60 FPS streaming',
+              icon: Radio,
+            },
+            {
+              id: 'dispatch',
+              label: '🔮 Smart Peak-Shaving & Demand Dispatch',
+              desc: 'AI forecasting & automated Slack alerts',
+              icon: Sliders,
+            },
+            {
+              id: 'buildings',
+              label: '🏢 Campus Power Grid & Sub-Meters',
+              desc: 'Directory of all 22 facilities',
+              icon: Building2,
+            },
+            {
+              id: 'table',
+              label: '🗂️ Telemetry Stream Records & Audit',
+              desc: 'Searchable database records & CSV export',
+              icon: Layers,
+            },
           ].map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -495,42 +598,46 @@ export default function ScadaDashboard() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2.5 px-5 py-3 text-sm font-semibold rounded-t-xl transition-all border-b-2 whitespace-nowrap ${
+                className={`flex items-center gap-3 px-5 py-3 text-sm font-semibold rounded-t-xl transition-all border-b-2 whitespace-nowrap ${
                   isActive
                     ? 'border-amber-400 text-amber-400 bg-amber-500/10'
                     : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40'
                 }`}
               >
                 <Icon className={`w-4 h-4 ${isActive ? 'text-amber-400' : 'text-slate-400'}`} />
-                <span>{tab.label}</span>
+                <div className="text-left">
+                  <div className="text-xs font-bold leading-tight">{tab.label}</div>
+                  <div className="text-[10px] text-slate-500 font-normal leading-tight">{tab.desc}</div>
+                </div>
               </button>
             );
           })}
         </div>
       </section>
 
-      {/* TAB CONTENT AREA */}
+      {/* MAIN TAB CONTENT AREA */}
       <main className="flex-1 px-6 py-6 max-w-[1600px] w-full mx-auto">
         {/* =================================================================== */}
-        {/* TAB 1: PHASE 4 REAL-TIME STREAMING */}
+        {/* TAB 1: REAL-TIME POWER TELEMETRY */}
         {/* =================================================================== */}
         {activeTab === 'stream' && (
           <div className="space-y-6">
             {/* Live Chart Panel */}
             <div className="glass-panel p-6 rounded-2xl">
-              <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+              <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
                 <div>
                   <h2 className="text-lg font-bold text-white flex items-center gap-2">
                     <Activity className="w-5 h-5 text-amber-400" />
-                    Live 5-Minute Sliding Window Timeline (60 FPS Recharts)
+                    Live Campus Power Demand Curve (60 FPS Telemetry Stream)
                   </h2>
                   <p className="text-xs text-slate-400">
-                    Real-time aggregated power (kW) and bus voltage (V) computed by Spark Structured Streaming
+                    Aggregated electricity consumption (kW) across 42 smart sub-meters computed in 5-minute sliding windows
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-xs font-medium">
+                    <span className="px-2 text-[10px] text-slate-500">Window:</span>
                     {(['15m', '30m', 'all'] as const).map(f => (
                       <button
                         key={f}
@@ -546,20 +653,28 @@ export default function ScadaDashboard() {
                 </div>
               </div>
 
-              {/* Chart */}
+              {/* Chart Explainer Tooltip */}
+              <div className="mb-4 px-3 py-2 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 flex items-center gap-2">
+                <Info className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span>
+                  <strong>Operator Guide:</strong> 5-minute sliding windows smooth out transient motor-startup spikes while preserving immediate detection of sustained peak demand breaches.
+                </span>
+              </div>
+
+              {/* Responsive 60 FPS Recharts Area Chart */}
               <div className="h-[360px] w-full">
                 {filteredTimeline.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={filteredTimeline} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                       <defs>
                         <linearGradient id="powerGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#FACC15" stopOpacity={0.4} />
-                          <stop offset="95%" stopColor="#FACC15" stopOpacity={0.0} />
+                          <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.4} />
+                          <stop offset="95%" stopColor="#F59E0B" stopOpacity={0.0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1E293B" vertical={false} />
                       <XAxis dataKey="time" stroke="#64748B" fontSize={11} tickLine={false} />
-                      <YAxis stroke="#64748B" fontSize={11} tickLine={false} domain={['auto', 'auto']} />
+                      <YAxis stroke="#64748B" fontSize={11} tickLine={false} domain={['auto', 'auto']} unit=" kW" />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: '#0F172A',
@@ -568,14 +683,14 @@ export default function ScadaDashboard() {
                           color: '#F8FAFC',
                           boxShadow: '0 10px 25px -5px rgba(0,0,0,0.5)',
                         }}
-                        itemStyle={{ color: '#FACC15' }}
-                        formatter={(val: any) => [`${val} kW`, 'Aggregated Power']}
+                        itemStyle={{ color: '#F59E0B' }}
+                        formatter={(val: any) => [`${val} kW`, 'Campus Power Demand']}
                         labelFormatter={(label: any) => `Sliding Window End: ${label}`}
                       />
                       <Area
                         type="monotone"
                         dataKey="totalPower"
-                        stroke="#FACC15"
+                        stroke="#F59E0B"
                         strokeWidth={3}
                         fillOpacity={1}
                         fill="url(#powerGrad)"
@@ -586,20 +701,26 @@ export default function ScadaDashboard() {
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center text-slate-500">
                     <Activity className="w-8 h-8 animate-pulse text-amber-500/50 mb-2" />
-                    <span>Awaiting sliding window events from Kafka & Spark...</span>
+                    <span>Loading real-time telemetry stream from Neon PostgreSQL...</span>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Quick Stats Grid */}
+            {/* Sub-Panels: Facility Consumption & Pipeline Architecture */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Category Power Distribution */}
               <div className="glass-panel p-6 rounded-2xl lg:col-span-2">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300 mb-4 flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-cyan-400" />
-                  Top Energy Consuming Campus Facilities
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-cyan-400" />
+                      Top Energy-Consuming Facilities
+                    </h3>
+                    <p className="text-xs text-slate-500">Real-time load ranking across campus buildings</p>
+                  </div>
+                  <span className="text-xs font-mono text-cyan-400">Peak kW Ranking</span>
+                </div>
                 <div className="h-[240px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={buildingChartData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
@@ -612,7 +733,7 @@ export default function ScadaDashboard() {
                           borderColor: '#334155',
                           borderRadius: '8px',
                         }}
-                        formatter={(val: any) => [`${val} kW`, 'Peak Load']}
+                        formatter={(val: any) => [`${val} kW`, 'Measured Load']}
                       />
                       <Bar dataKey="power" fill="#38BDF8" radius={[0, 6, 6, 0]} />
                     </BarChart>
@@ -620,40 +741,40 @@ export default function ScadaDashboard() {
                 </div>
               </div>
 
-              {/* Streaming Status Panel */}
+              {/* Streaming Pipeline Architecture Panel */}
               <div className="glass-panel p-6 rounded-2xl space-y-4">
                 <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-amber-400" />
-                  Kafka-Spark Pipeline Metrics
+                  <Server className="w-4 h-4 text-amber-400" />
+                  Streaming Pipeline Architecture
                 </h3>
 
                 <div className="space-y-3 font-mono text-xs">
                   <div className="flex justify-between items-center py-2 border-b border-slate-800">
-                    <span className="text-slate-400">Kafka Topic</span>
-                    <span className="text-slate-200 font-semibold">gridpulse.telemetry.raw</span>
+                    <span className="text-slate-400">IoT Event Broker</span>
+                    <span className="text-slate-200 font-semibold">Kafka (KRaft Cluster)</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2 border-b border-slate-800">
+                    <span className="text-slate-400">Stream Processing</span>
+                    <span className="text-slate-200 font-semibold">Spark Structured Streaming</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-slate-800">
                     <span className="text-slate-400">Sliding Window</span>
                     <span className="text-slate-200 font-semibold">5 mins (slide: 1 min)</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-slate-800">
-                    <span className="text-slate-400">Micro-Batch Trigger</span>
-                    <span className="text-emerald-400 font-semibold">15 seconds</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2 border-b border-slate-800">
-                    <span className="text-slate-400">PostgreSQL Sink Table</span>
-                    <span className="text-slate-200 font-semibold">building_energy_aggregates</span>
+                    <span className="text-slate-400">Relational Hot Path</span>
+                    <span className="text-emerald-400 font-semibold">Neon PostgreSQL (Pooled)</span>
                   </div>
                   <div className="flex justify-between items-center py-2">
-                    <span className="text-slate-400">Data Lake Format</span>
-                    <span className="text-cyan-400 font-semibold">Snappy Parquet (Cold Path)</span>
+                    <span className="text-slate-400">Cold Path Analytics</span>
+                    <span className="text-cyan-400 font-semibold">DuckDB & Snappy Parquet</span>
                   </div>
                 </div>
 
                 <div className="pt-2">
                   <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-400 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                    <span>Real-time aggregation engine operational.</span>
+                    <span>Pipeline status: Micro-batching operational.</span>
                   </div>
                 </div>
               </div>
@@ -662,20 +783,32 @@ export default function ScadaDashboard() {
         )}
 
         {/* =================================================================== */}
-        {/* TAB 2: PHASE 6 AI FORECASTING & WEBHOOK DISPATCH */}
+        {/* TAB 2: SMART PEAK-SHAVING & DEMAND DISPATCH */}
         {/* =================================================================== */}
         {activeTab === 'dispatch' && (
           <div className="space-y-6">
+            {/* Explainer Box */}
+            <div className="p-4 rounded-2xl bg-amber-950/20 border border-amber-500/30 flex items-start gap-3 text-xs text-slate-300">
+              <HelpCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-amber-300">How Automated Demand Response & Peak Shaving Works:</p>
+                <p className="text-slate-400 mt-1">
+                  Utilities charge steep monthly demand penalties if campus load breaches the contract threshold ({contractThreshold} kW).
+                  The predictive engine continuously calculates projected overload and automatically engages progressive load-shedding directives (Tier 1 setbacks, Tier 2 HVAC cycling, and Tier 3 battery injection) while notifying operators through Slack.
+                </p>
+              </div>
+            </div>
+
             {/* Interactive Threshold Slider Panel */}
             <div className="glass-panel-glow p-6 rounded-2xl">
               <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
                 <div>
                   <h2 className="text-lg font-bold text-white flex items-center gap-2">
                     <TrendingUp className="w-5 h-5 text-amber-400" />
-                    Interactive Demand Response Threshold Optimizer
+                    Interactive Contract Demand Ceiling Optimizer
                   </h2>
                   <p className="text-xs text-slate-400">
-                    Adjust campus contract demand ceiling to simulate real-time peak-shaving dispatch and penalty avoidance
+                    Adjust the contract demand slider to evaluate real-time overload risk and tariff penalty savings
                   </p>
                 </div>
 
@@ -699,9 +832,9 @@ export default function ScadaDashboard() {
                   className="w-full h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-400"
                 />
                 <div className="flex justify-between text-xs font-mono text-slate-500 mt-2">
-                  <span>550 kW (Aggressive)</span>
-                  <span>800 kW (Standard Campus Limit)</span>
-                  <span>1,100 kW (Loose Margin)</span>
+                  <span>550 kW (Aggressive Curtailment)</span>
+                  <span>800 kW (Standard Contract Capacity)</span>
+                  <span>1,100 kW (High Risk Margin)</span>
                 </div>
               </div>
 
@@ -709,7 +842,7 @@ export default function ScadaDashboard() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
                 <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
                   <span className="text-xs text-slate-400 font-medium uppercase tracking-wider">
-                    Projected Peak Demand
+                    Projected 24h Peak Demand
                   </span>
                   <div className="mt-1 text-2xl font-extrabold font-mono text-white">
                     {projectedPeak.toFixed(1)} kW
@@ -729,18 +862,18 @@ export default function ScadaDashboard() {
                     {projectedOverload > 0 ? `+${projectedOverload.toFixed(1)} kW` : '0.0 kW (SAFE)'}
                   </div>
                   <span className="text-xs text-slate-500 mt-1 block">
-                    {projectedOverload > 0 ? 'Exceeds contract capacity' : 'Operating within limits'}
+                    {projectedOverload > 0 ? 'Exceeds contract capacity limit' : 'Operating within safe limits'}
                   </span>
                 </div>
 
                 <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
                   <span className="text-xs text-slate-400 font-medium uppercase tracking-wider">
-                    Demand Penalty Savings
+                    Potential Tariff Penalty Savings
                   </span>
                   <div className="mt-1 text-2xl font-extrabold font-mono text-emerald-400">
                     INR {potentialSavings.toLocaleString()}
                   </div>
-                  <span className="text-xs text-slate-500 mt-1 block">Monthly tariff tariff reduction</span>
+                  <span className="text-xs text-slate-500 mt-1 block">Avoided demand-charge surcharge</span>
                 </div>
               </div>
             </div>
@@ -751,10 +884,10 @@ export default function ScadaDashboard() {
                 <div>
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
                     <ShieldAlert className="w-5 h-5 text-amber-400" />
-                    Automated 3-Tier Peak-Shaving Directives
+                    3-Tier Automated Load-Shedding Countermeasures
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Interactive load-shedding switches linked to SCADA automated actuation
+                    Toggle individual tiers to simulate automated demand response actuation
                   </p>
                 </div>
 
@@ -794,10 +927,10 @@ export default function ScadaDashboard() {
                   </div>
                   <h4 className="font-bold text-sm text-white mt-2">Non-Critical Facilities & EV Setback</h4>
                   <p className="text-xs text-slate-400 mt-1">
-                    Dimming streetlights, setback charging stations, pump throttling.
+                    Dimming streetlights, setback EV charging stations, pump throttling.
                   </p>
                   <div className="mt-3 flex justify-between items-center text-xs font-mono">
-                    <span className="text-slate-400">Shed Target:</span>
+                    <span className="text-slate-400">Shed Capacity:</span>
                     <span className="font-bold text-amber-400">45.0 kW</span>
                   </div>
                 </div>
@@ -812,7 +945,7 @@ export default function ScadaDashboard() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
-                      Tier 2 • Chiller Cycling
+                      Tier 2 • Duty Cycling
                     </span>
                     <button
                       onClick={() => setTier2Armed(!tier2Armed)}
@@ -827,12 +960,12 @@ export default function ScadaDashboard() {
                       />
                     </button>
                   </div>
-                  <h4 className="font-bold text-sm text-white mt-2">Academic & Lecture Theatre HVAC</h4>
+                  <h4 className="font-bold text-sm text-white mt-2">Academic & Lecture Hall HVAC Cycling</h4>
                   <p className="text-xs text-slate-400 mt-1">
                     Duty cycling large chillers and air handlers across LT1, LT2, and Computer Center.
                   </p>
                   <div className="mt-3 flex justify-between items-center text-xs font-mono">
-                    <span className="text-slate-400">Shed Target:</span>
+                    <span className="text-slate-400">Shed Capacity:</span>
                     <span className="font-bold text-amber-400">40.5 kW</span>
                   </div>
                 </div>
@@ -847,7 +980,7 @@ export default function ScadaDashboard() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold uppercase tracking-wider text-red-400">
-                      Tier 3 • BESS Injection
+                      Tier 3 • Battery Injection
                     </span>
                     <button
                       onClick={() => setTier3Armed(!tier3Armed)}
@@ -862,12 +995,12 @@ export default function ScadaDashboard() {
                       />
                     </button>
                   </div>
-                  <h4 className="font-bold text-sm text-white mt-2">Battery Energy Storage Injection</h4>
+                  <h4 className="font-bold text-sm text-white mt-2">BESS Sub-Station Battery Injection</h4>
                   <p className="text-xs text-slate-400 mt-1">
-                    Discharge 150 kWh sub-station LiFePO4 battery array to cap grid import peak.
+                    Discharge 500 kWh stationary LiFePO4 battery array to cap grid import peak.
                   </p>
                   <div className="mt-3 flex justify-between items-center text-xs font-mono">
-                    <span className="text-slate-400">Shed Target:</span>
+                    <span className="text-slate-400">Shed Capacity:</span>
                     <span className="font-bold text-red-400">50.0 kW</span>
                   </div>
                 </div>
@@ -880,38 +1013,40 @@ export default function ScadaDashboard() {
                 <div>
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
                     <BellRing className="w-5 h-5 text-amber-400" />
-                    Automated Incident Webhook Dispatcher Console
+                    Automated Slack Incident Dispatcher
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Delivers rich Block Kit incident cards directly to Slack, Discord, or SCADA sink endpoints with zero lag
+                    Dispatches structured Block Kit incident cards to campus electrical operators with zero latency
                   </p>
                 </div>
 
                 <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 font-mono font-semibold border border-emerald-500/30 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  LIVE WEBHOOK ACTIVE
+                  SLACK BOT ACTIVE
                 </span>
               </div>
 
               {/* Endpoint configuration */}
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-300 block">
-                  Target Slack / Discord Webhook URL (Optional override, defaults to server .env.local):
+                  Slack Webhook Target URL (Optional override; defaults to server-configured webhook):
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={webhookUrl}
                     onChange={e => setWebhookUrl(e.target.value)}
-                    placeholder="Leave empty to use server ALERT_WEBHOOK_URL, or paste custom endpoint..."
+                    placeholder="Leave empty to use pre-configured ALERT_WEBHOOK_URL, or paste custom endpoint..."
                     className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-amber-400 transition"
                   />
-                  <button
-                    onClick={() => setWebhookUrl('')}
-                    className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 transition"
-                  >
-                    Clear
-                  </button>
+                  {webhookUrl && (
+                    <button
+                      onClick={() => setWebhookUrl('')}
+                      className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 transition"
+                    >
+                      Reset Default
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -923,7 +1058,7 @@ export default function ScadaDashboard() {
                   className="flex items-center justify-center gap-2.5 px-5 py-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/20 hover:brightness-110 active:scale-[0.99] transition disabled:opacity-50"
                 >
                   <Send className={`w-4 h-4 ${isDispatching ? 'animate-bounce' : ''}`} />
-                  <span>Dispatch Peak Shaving Alert to Slack</span>
+                  <span>Dispatch Peak Shaving Directive to Slack</span>
                 </button>
 
                 <button
@@ -932,7 +1067,7 @@ export default function ScadaDashboard() {
                   className="flex items-center justify-center gap-2.5 px-5 py-3.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-500 text-white font-bold text-sm shadow-lg shadow-red-500/20 hover:brightness-110 active:scale-[0.99] transition disabled:opacity-50"
                 >
                   <ShieldAlert className={`w-4 h-4 ${isDispatching ? 'animate-bounce' : ''}`} />
-                  <span>Dispatch SCADA Voltage Sag Alert</span>
+                  <span>Dispatch SCADA Voltage Sag Alert to Slack</span>
                 </button>
               </div>
 
@@ -981,42 +1116,55 @@ export default function ScadaDashboard() {
         )}
 
         {/* =================================================================== */}
-        {/* TAB 3: CAMPUS INFRASTRUCTURE & BUILDINGS */}
+        {/* TAB 3: CAMPUS POWER GRID & SUB-METERS */}
         {/* =================================================================== */}
         {activeTab === 'buildings' && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
                   <Building2 className="w-5 h-5 text-cyan-400" />
-                  Campus Energy Infrastructure Directory
+                  Campus Facility Power Hierarchy
                 </h2>
                 <p className="text-xs text-slate-400">
-                  42 smart sub-meters across 22 educational, residential, and operational facilities
+                  Comprehensive directory of all 22 campus buildings and their active sub-meters
                 </p>
               </div>
 
-              {/* Category Filter */}
-              <div className="flex items-center gap-2">
-                {['All', 'Hostels', 'Departments', 'Lecture Theatres', 'Facilities'].map(cat => (
-                  <button
-                    key={cat}
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                      selectedCategory === cat
-                        ? 'bg-cyan-500 text-slate-950 shadow'
-                        : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
+              {/* Search Bar & Category Filter */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Search facility name..."
+                    className="bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-slate-900/80 p-1 rounded-lg border border-slate-800">
+                  {['All', 'Hostels', 'Departments', 'Lecture Theatres', 'Facilities'].map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCategory(cat)}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition ${
+                        selectedCategory === cat
+                          ? 'bg-cyan-500 text-slate-950 shadow'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
             {/* Building Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {filteredRows.slice(0, 20).map(b => (
+              {filteredRows.map(b => (
                 <div
                   key={`${b.building_id}-${b.id}`}
                   className="glass-panel p-4 rounded-xl border border-slate-800 hover:border-cyan-500/40 transition group"
@@ -1027,18 +1175,30 @@ export default function ScadaDashboard() {
                       {b.building_type}
                     </span>
                   </div>
-                  <h4 className="font-bold text-sm text-white mt-1 group-hover:text-cyan-300 transition">
+                  <h4 className="font-bold text-sm text-white mt-1.5 group-hover:text-cyan-300 transition">
                     {b.building_name}
                   </h4>
                   <div className="mt-3 flex justify-between items-baseline font-mono">
-                    <span className="text-xs text-slate-400">Power:</span>
+                    <span className="text-xs text-slate-400">Measured Load:</span>
                     <span className="text-base font-extrabold text-amber-400">
                       {b.avg_power_kw.toFixed(1)} kW
                     </span>
                   </div>
                   <div className="mt-1 flex justify-between items-baseline font-mono text-xs text-slate-500">
-                    <span>Voltage:</span>
-                    <span>{b.avg_voltage_v.toFixed(1)} V</span>
+                    <span>Bus Voltage:</span>
+                    <span className="text-emerald-400 font-semibold">{b.avg_voltage_v.toFixed(1)} V</span>
+                  </div>
+                  <div className="mt-1 flex justify-between items-baseline font-mono text-xs text-slate-500">
+                    <span>Power Factor:</span>
+                    <span className="text-slate-300">{b.avg_power_factor.toFixed(2)}</span>
+                  </div>
+
+                  {/* Visual Load Bar */}
+                  <div className="mt-3 w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-500 to-amber-400 rounded-full"
+                      style={{ width: `${Math.min(100, (b.avg_power_kw / 55) * 100)}%` }}
+                    />
                   </div>
                 </div>
               ))}
@@ -1047,23 +1207,33 @@ export default function ScadaDashboard() {
         )}
 
         {/* =================================================================== */}
-        {/* TAB 4: LIVE AGGREGATES TABLE */}
+        {/* TAB 4: TELEMETRY STREAM RECORDS & AUDIT */}
         {/* =================================================================== */}
         {activeTab === 'table' && (
           <div className="space-y-4">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-wrap justify-between items-center gap-4">
               <div>
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
                   <Layers className="w-5 h-5 text-amber-400" />
-                  Live Relational Aggregates Stream (building_energy_aggregates)
+                  Live Relational Telemetry Audit Table
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Sliding window micro-batches written by Spark Structured Streaming directly into Neon PostgreSQL
+                  Real-time sliding window aggregates synchronized directly from Neon Cloud PostgreSQL
                 </p>
               </div>
 
-              <div className="text-xs font-mono text-slate-400">
-                Displaying <span className="text-amber-400 font-bold">{filteredRows.length}</span> rows
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={exportCsv}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-slate-200 hover:text-white transition"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Export CSV</span>
+                </button>
+
+                <div className="text-xs font-mono text-slate-400">
+                  Showing <span className="text-amber-400 font-bold">{filteredRows.length}</span> active records
+                </div>
               </div>
             </div>
 
@@ -1071,12 +1241,12 @@ export default function ScadaDashboard() {
               <table className="w-full text-left text-xs font-mono">
                 <thead className="bg-slate-900/90 text-slate-400 border-b border-slate-800">
                   <tr>
-                    <th className="py-3 px-4">ID</th>
+                    <th className="py-3 px-4">Record ID</th>
                     <th className="py-3 px-4">Window Start</th>
                     <th className="py-3 px-4">Window End</th>
-                    <th className="py-3 px-4">Building ID</th>
-                    <th className="py-3 px-4">Building Name</th>
-                    <th className="py-3 px-4">Category</th>
+                    <th className="py-3 px-4">Facility ID</th>
+                    <th className="py-3 px-4">Facility Name</th>
+                    <th className="py-3 px-4">Zone</th>
                     <th className="py-3 px-4 text-right">Avg Power (kW)</th>
                     <th className="py-3 px-4 text-right">Avg Voltage (V)</th>
                     <th className="py-3 px-4 text-right">Power Factor</th>
@@ -1113,18 +1283,18 @@ export default function ScadaDashboard() {
         )}
       </main>
 
-      {/* FOOTER */}
-      <footer className="border-t border-slate-800/80 bg-slate-950/60 px-6 py-4 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
+      {/* OPERATIONAL FOOTER */}
+      <footer className="border-t border-slate-800/80 bg-slate-950/70 px-6 py-4 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
         <div className="flex items-center gap-3">
-          <span className="text-amber-400 font-bold">GridPulse SCADA</span>
+          <span className="text-amber-400 font-bold">GridPulse Operations Portal</span>
           <span>•</span>
           <span>Next.js 15 App Router</span>
           <span>•</span>
-          <span>Neon Cloud PostgreSQL (Pooler)</span>
+          <span>Neon Cloud PostgreSQL (High-Throughput Pooler)</span>
         </div>
         <div className="flex items-center gap-4 font-mono">
-          <span>Telemetry Sync: {lastSyncTime || 'Awaiting tick'}</span>
-          <span>Engine Refresh: {refreshInterval > 0 ? `${refreshInterval / 1000}s` : 'Paused'}</span>
+          <span>Last Sync: {lastSyncTime || 'Awaiting tick'}</span>
+          <span>Refresh Cadence: {refreshInterval > 0 ? `${refreshInterval / 1000}s` : 'Paused'}</span>
         </div>
       </footer>
     </div>
