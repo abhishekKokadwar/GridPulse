@@ -249,8 +249,8 @@ anomalies_info = detect_anomalies(df_filtered)
 # ---------------------------------------------------------
 col_head1, col_head2 = st.columns([3, 1])
 with col_head1:
-    st.title("⚡ GridPulse — Smart Campus Energy Telemetry")
-    st.caption("Phase 2 Architecture: Python Simulator → PostgreSQL (Neon) → SQL → Pandas → Streamlit")
+    st.title("⚡ GridPulse — Smart Campus Energy Operations Portal")
+    st.caption("Smart Campus Real-Time Energy Telemetry • Neon Cloud PostgreSQL • DuckDB OLAP • Predictive AI Dispatch")
 
 with col_head2:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -263,6 +263,16 @@ with col_head2:
     )
 
 st.markdown("---")
+
+# ---------------------------------------------------------
+# Feature 1: Operator Onboarding Banner
+# ---------------------------------------------------------
+st.info(
+    "💡 **Welcome to GridPulse: Autonomous Campus Microgrid & SCADA Command Center**  \n"
+    "Monitoring **42 IoT smart sub-meters** across **22 campus facilities**. Telemetry streams through Apache Kafka, "
+    "aggregates into 5-minute sliding windows via Apache Spark, and persists into Neon Serverless PostgreSQL. "
+    "Use the self-explanatory operational tabs below to inspect live power telemetry, test AI peak-shaving dispatch, or evaluate facility loads."
+)
 
 # ---------------------------------------------------------
 # Top KPIs Metric Row
@@ -307,23 +317,29 @@ st.markdown("<br>", unsafe_allow_html=True)
 # Main Tabs Layout
 # ---------------------------------------------------------
 tab_realtime, tab_lakehouse, tab_forecast, tab_trends, tab_schedules, tab_hierarchy, tab_anomalies, tab_db_schema, tab_explorer = st.tabs([
-    "⚡ Phase 4: Real-Time Stream",
-    "🧊 Phase 5: Data Lakehouse",
-    "🔮 Phase 6: AI Forecasting & Dispatch",
+    "⚡ Real-Time Power Telemetry",
+    "🧊 Analytical Data Lakehouse (DuckDB)",
+    "🔮 Smart Peak-Shaving & Demand Dispatch",
     "📈 Multi-Day Timeline",
     "🕒 24-Hour & Schedule Curves",
-    "🏢 Infrastructure & Buildings",
-    "⚠️ Grid Health & PostgreSQL Alerts",
+    "🏢 Campus Power Grid & Sub-Meters",
+    "⚠️ Grid Health & Fault Alerts",
     "🏛️ Relational DB Schema",
-    "🗂️ Telemetry Query Explorer",
+    "🗂️ Telemetry Stream Records & Audit",
 ])
 
 # ---------------------------------------------------------
-# Tab 0: Phase 4 Real-Time Streaming View
+# Tab 0: Real-Time Power Telemetry View
 # ---------------------------------------------------------
 with tab_realtime:
-    st.subheader("⚡ Live Kafka-Spark Streaming Analytics (PostgreSQL Aggregates)")
-    st.caption("Powered by Spark Structured Streaming with 5-minute sliding windows.")
+    st.subheader("⚡ Live Campus Power Demand Curve (Streaming Telemetry)")
+    st.caption("Aggregated electricity consumption (kW) computed across 42 IoT sub-meters in 5-minute sliding windows.")
+    
+    # Feature 2: Chart Guidance Callout
+    st.info(
+        "💡 **Chart Guidance Callout:** 5-minute sliding windows smooth out transient motor-startup noise "
+        "while capturing sustained peak demand breaches in real-time."
+    )
     
     @st.fragment(run_every="3s")
     def realtime_streaming_view():
@@ -516,8 +532,14 @@ with tab_lakehouse:
 # Tab 2: Phase 6 AI Forecasting & Automated Dispatch
 # ---------------------------------------------------------
 with tab_forecast:
-    st.subheader("🔮 Phase 6: Predictive AI Load Forecasting & Automated Dispatch")
+    st.subheader("🔮 Smart Peak-Shaving & Automated Demand-Response Dispatch")
     st.caption("24-Hour ahead recursive energy forecasting with 95% confidence bounds and automated demand-response peak-shaving dispatch.")
+
+    # Feature 3: Demand Response Explainer
+    st.info(
+        "💡 **Demand Response Explainer:** Utilities charge steep monthly demand penalties if campus load breaches contract limits. "
+        "Our predictive engine projects overloads 24 hours ahead to shed non-essential loads automatically and avoid expensive penalty tariffs."
+    )
 
     forecaster = LoadForecaster()
     is_loaded = forecaster.load_model()
@@ -605,7 +627,45 @@ with tab_forecast:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # 5. Automated Demand-Response Directives
-    st.markdown("#### ⚡ Automated Demand-Response Directives (Peak-Shaving Actions)")
+    st.markdown("#### ⚡ 3-Tier Automated Load-Shedding Countermeasures")
+    st.caption("Pre-configured demand-response tiers with discrete relief capacity targets:")
+
+    col_t1, col_t2, col_t3 = st.columns(3)
+    with col_t1:
+        st.markdown(
+            """
+            <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 10px; padding: 12px;">
+                <b style="color: #facc15;">🟢 Tier 1 • Soft Shedding</b><br>
+                <small style="color: #e2e8f0;">Non-Critical Lighting & EV Setback</small><br>
+                <span style="font-family: monospace; font-weight: bold; color: #facc15;">Relief Target: -45.0 kW</span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    with col_t2:
+        st.markdown(
+            """
+            <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 10px; padding: 12px;">
+                <b style="color: #facc15;">🟡 Tier 2 • Duty Cycling</b><br>
+                <small style="color: #e2e8f0;">Academic & Lecture Hall HVAC Cycling</small><br>
+                <span style="font-family: monospace; font-weight: bold; color: #facc15;">Relief Target: -40.5 kW</span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    with col_t3:
+        st.markdown(
+            """
+            <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 10px; padding: 12px;">
+                <b style="color: #f87171;">🔴 Tier 3 • BESS Battery Injection</b><br>
+                <small style="color: #e2e8f0;">500 kWh Substation Battery Discharge</small><br>
+                <span style="font-family: monospace; font-weight: bold; color: #f87171;">Relief Target: -50.0 kW</span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    st.markdown("<br>", unsafe_allow_html=True)
+
     if not dispatch_plan["has_violations"]:
         st.success("✅ **Campus Grid Nominal:** Peak load remains within contract demand threshold. No automated load-shedding required.")
     else:
@@ -869,14 +929,34 @@ with tab_schedules:
             st.caption("🔴 Red bar highlights Sunday closure (~2.5 kW standby vs ~28 kW weekday operations).")
 
 # ---------------------------------------------------------
-# Tab 3: Infrastructure & Buildings
+# Tab 3: Infrastructure & Buildings (Campus Power Grid)
 # ---------------------------------------------------------
 with tab_hierarchy:
+    st.subheader("🏢 Campus Power Grid & Sub-Meter Hierarchy")
+    st.caption("Interactive directory and consumption breakdown across all 22 campus buildings and 42 smart meters.")
+
+    # Feature 5: Instant Facility Search Bar
+    bldg_search = st.text_input(
+        "🔍 Search Campus Facility or Meter ID",
+        "",
+        placeholder="Type facility name or ID (e.g., Library, BH1, Powerhouse, CS, M001)...",
+        help="Instantly filter the hierarchy charts and tables by building name or ID."
+    )
+
+    df_hier_filtered = df_filtered
+    if bldg_search.strip():
+        q_clean = bldg_search.strip().lower()
+        df_hier_filtered = df_filtered[
+            df_filtered["building_id"].str.lower().str.contains(q_clean) |
+            df_filtered["meter_id"].str.lower().str.contains(q_clean)
+        ]
+        st.caption(f"Showing filtered results for: **'{bldg_search}'** ({len(df_hier_filtered):,} matching records)")
+
     col_c1, col_c2 = st.columns([1, 1])
 
     with col_c1:
         st.subheader("Category Energy Share")
-        cat_summary = get_category_summary(df_filtered)
+        cat_summary = get_category_summary(df_hier_filtered)
         if not cat_summary.empty:
             bar_cat = (
                 alt.Chart(cat_summary)
@@ -1026,20 +1106,23 @@ with tab_db_schema:
     )
 
 # ---------------------------------------------------------
-# Tab 6: Telemetry Query Explorer
+# Tab 6: Telemetry Stream Records & Audit
 # ---------------------------------------------------------
 with tab_explorer:
-    st.subheader(f"Data Explorer — Source: {data_source_mode}")
+    st.subheader(f"🗂️ Telemetry Stream Records & Audit — Source: {data_source_mode}")
+    st.caption("Searchable database records of campus smart meter telemetry with one-click export.")
     col_d1, col_d2 = st.columns([3, 1])
     with col_d1:
         data_view = st.radio("Select View", ["Latest Readings", "Calculated Apparent/Reactive Power (kVA/kVAR)"], horizontal=True)
     with col_d2:
+        # Feature 6: One-Click CSV Export
         csv_data = df_filtered.to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="📥 Export SQL Query to CSV",
+            label="📥 One-Click CSV Export",
             data=csv_data,
-            file_name=f"gridpulse_postgres_telemetry_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            file_name=f"gridpulse_telemetry_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
+            help="Download all currently filtered campus telemetry records as a CSV spreadsheet."
         )
 
     if data_view == "Latest Readings":
